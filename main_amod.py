@@ -98,7 +98,7 @@ def run_training(feature_extractor, rl_algorithm):
     if rl_algorithm == RLAlgorithm.A2C:
         model = A2C(CustomMultiInputActorCriticPolicy,
                     env, policy_kwargs=policy_kwargs, verbose=1,
-                    use_rms_prop=False, learning_rate=1e-3, ent_coef=0.3, n_steps=100,
+                    use_rms_prop=False, learning_rate=1e-3, ent_coef=0.3, n_steps=1,
                     gamma=0.99, device=device)
 
         eval_callback = EvaluationCallback(env, writer, eval_freq=1000, save_freq=10000,
@@ -108,7 +108,7 @@ def run_training(feature_extractor, rl_algorithm):
             model = A2C.load(CHECKPOINT_PATH, env=env, device=device)
     elif rl_algorithm == RLAlgorithm.PPO:
         model = PPO(CustomMultiInputActorCriticPolicy, env, policy_kwargs=policy_kwargs,
-                    verbose=1, learning_rate=1e-3, ent_coef=0.3, n_steps=100,
+                    verbose=1, learning_rate=1e-3, ent_coef=0.3, n_steps=1,
                    gamma=0.99, device=device)
         eval_callback = EvaluationCallback(env, writer, eval_freq=1000, save_freq=10000,
                                            rl_algorithm=rl_algorithm, feature_extractor=feature_extractor)
@@ -128,4 +128,4 @@ def run_training(feature_extractor, rl_algorithm):
     model.learn(total_timesteps=20000000, callback=eval_callback)
 
 # note that a MPNN won't work here because the amod observation space does not have an edge attr
-run_training(FeatureExtractor.GCN, RLAlgorithm.SAC)
+run_training(FeatureExtractor.GCN, RLAlgorithm.A2C)

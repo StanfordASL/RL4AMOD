@@ -10,19 +10,28 @@ import os
 from collections import defaultdict
 import networkx as nx
 from src.misc.utils import mat2str
-from copy import deepcopy
 import json
 from src.misc.utils import dictsum
 from src.algos.reb_flow_solver import solveRebFlow
 import gymnasium as gym
 import os
-
+import sys
+if 'SUMO_HOME' in os.environ:
+    sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
+import sumolib
+import traci
+import math
+from lxml import etree as ET
+from collections import defaultdict
+from itertools import combinations
+from sklearn.cluster import KMeans
 
 demand_ratio = {
     "san_francisco": 2,
     "washington_dc": 4.2,
     "nyc_brooklyn": 9,
     "shenzhen_downtown_west": 2.5,
+    "lux": 0.1
 }
 json_hr = {
     "san_francisco": 19,
@@ -36,7 +45,16 @@ beta_dict = {
     "nyc_brooklyn": 0.5,
     "shenzhen_downtown_west": 0.5,
 }
-
+scenario_path = 'data/LuSTScenario/'
+sumocfg_file = 'dua_meso.static.sumocfg'
+net_file = os.path.join(scenario_path, 'input/lust_meso.net.xml')
+matching_tstep = 1
+sumo_cmd = [
+    "sumo", "--no-internal-links", "-c", os.path.join(scenario_path, sumocfg_file),
+    "--device.taxi.dispatch-algorithm", "traci",
+    "-b", "0", "--seed", "10",
+    "-W", 'true', "-v", 'false',
+]
 # TODO: make this configurable
 CPLEXPATH = "/opt/ibm/ILOG/CPLEX_Studio2211/opl/bin/x86-64_linux/"
 # CPLEXPATH = "/Applications/CPLEX_Studio2211/opl/bin/arm64_osx/"
@@ -46,37 +64,32 @@ class GNNParser:
     Parser converting raw environment observations to agent inputs (s_t).
     """
 
-    def __init__(self, env, T=10, json_file=None, scale_factor=0.01):
+    def __init__(self, env, grid_h=4, grid_w=4, scale_factor=0.01):
         super().__init__()
         self.env = env
-        self.T = T
+        self.T = self.env.scenario.thorizon
         self.s = scale_factor
-        self.json_file = json_file
-        if self.json_file is not None:
-            with open(json_file, "r") as file:
-                self.data = json.load(file)
-
+        self.grid_h = grid_h
+        self.grid_w = grid_w
+   
     def get_edge_index(self):
-        if self.json_file is not None:
-            edge_index = torch.vstack(
-                (
-                    torch.tensor(
-                        [edge["i"] for edge in self.data["topology_graph"]]
-                    ).view(1, -1),
-                    torch.tensor(
-                        [edge["j"] for edge in self.data["topology_graph"]]
-                    ).view(1, -1),
-                )
-            ).long()
-        else:
-            edge_index = torch.cat(
-                (
-                    torch.arange(self.env.nregion).view(1, self.env.nregion),
-                    torch.arange(self.env.nregion).view(1, self.env.nregion),
-                ),
-                dim=0,
-            ).long()
-        return edge_index
+        return torch.cat([torch.tensor([self.env.region]), torch.tensor([self.env.region])])
+ 
+    def parse_obs(self, obs):
+        x = torch.cat((
+            torch.tensor([obs[0][n][self.env.time+1]*self.s for n in self.env.region]).view(1, 1, self.env.nregions).float(),
+            torch.tensor([[(obs[0][n][self.env.time+1] + self.env.dacc[n][t])*self.s for n in self.env.region] \
+                          for t in range(self.env.time+1, self.env.time+self.T+1)]).view(1, self.T, self.env.nregions).float(),
+            torch.tensor([[sum([(self.env.demand[i,j][t])*(self.env.price[i,j][t])*self.s \
+                          for j in self.env.region]) for i in self.env.region] for t in range(self.env.time+1, self.env.time+self.T+1)]).view(1, self.T, self.env.nregions).float()),
+              dim=1).squeeze(0).view(21, self.env.nregions).T
+
+        # Edge index self-connected tensor definition (da modificare)
+        edge_index = self.get_edge_index()
+        return {
+            "node_features": x.numpy(),
+            "edge_index": edge_index.numpy()
+        }
 
     def parse_obs(self, obs):
         x = (
@@ -141,279 +154,267 @@ class GNNParser:
 class AMoD(gym.Env):
     # initialization
     def __init__(
-        self, beta=0.2, city="san_francisco", reward_scale_factor=1
+        self, beta=0.2, city="lux", reward_scale_factor=1
     ):  # updated to take scenario and beta (cost for rebalancing) as input
         print("Running for city ", city)
         self.json_file = f"data/scenario_{city}.json"
-        self.scenario = Scenario(
-            json_file=self.json_file,
-            demand_ratio=demand_ratio[city],
-            json_hr=json_hr[city],
-            sd=100,
-            json_tstep=3, # TODO: change tstep of nyc to 4 during testing
-            tf=20,
-        )
+        
+        
+        scenario = Scenario(num_cluster=8, json_file="data/scenario_nyc4x4.json", sumo_net_file=net_file, acc_init=20, sd=100, demand_ratio=demand_ratio[city], time_start=0, time_horizon=10, duration=2, tstep=matching_tstep)
         self.city = city
-        self.reward_scale_factor = reward_scale_factor
-
-        self.G = (
-            self.scenario.G
-        )  # Road Graph: node - region, edge - connection of regions, node attr: 'accInit', edge attr: 'time'
-        self.demandTime = self.scenario.demandTime
-        self.rebTime = self.scenario.rebTime
+        self.reward_scale_factor=reward_scale_factor
+        self.scenario = scenario
+        self.G = scenario.G  # Road Graph: node - region, edge - connection of regions, node attr: 'accInit', edge attr: 'time'
+        self.regions_sumo = scenario.regions_sumo
+        self.taxi_routes = scenario.taxi_routes
+        self.reservations = list()
+        self.reservations_assigned = list()
+        self.demand_time = self.scenario.demand_time
+        self.reb_time = self.scenario.reb_time
         self.time = 0  # current time
-        self.tf = self.scenario.tf  # final time
+        self.tstep = self.scenario.tstep
+        self.duration = scenario.duration  # final time
         self.demand = defaultdict(dict)  # demand
-        self.depDemand = dict()
-        self.arrDemand = dict()
         self.region = list(self.G)  # set of regions
-        for i in self.region:
-            self.depDemand[i] = defaultdict(float)
-            self.arrDemand[i] = defaultdict(float)
-
         self.price = defaultdict(dict)  # price
-        for (
-            i,
-            j,
-            t,
-            d,
-            p,
-        ) in (
-            self.scenario.tripAttr
-        ):  # trip attribute (origin, destination, time of request, demand, price)
-            self.demand[i, j][t] = d
-            self.price[i, j][t] = p
-            self.depDemand[i][t] += d
-            self.arrDemand[i][t + self.demandTime[i, j][t]] += d
-        self.acc = defaultdict(
-            dict
-        )  # number of vehicles within each region, key: i - region, t - time
-        self.dacc = defaultdict(
-            dict
-        )  # number of vehicles arriving at each region, key: i - region, t - time
-        self.rebFlow = defaultdict(
-            dict
-        )  # number of rebalancing vehicles, key: (i,j) - (origin, destination), t - time
-        self.paxFlow = defaultdict(
-            dict
-        )  # number of vehicles with passengers, key: (i,j) - (origin, destination), t - time
+        self.acc = defaultdict(dict)  # number of vehicles within each region, key: i - region, t - time
+        self.dacc = defaultdict(dict)  # number of vehicles arriving at each region, key: i - region, t - time
+        self.demand_res = defaultdict(dict)  # reservations from sumo assigned to each (origin, destination) pair
+        self.rebFlow = defaultdict(dict)  # number of rebalancing vehicles, key: (i,j) - (origin, destination), t - time
+        self.paxFlow = defaultdict(dict)  # number of vehicles with passengers, key: (i,j) - (origin, destination), t - time
+        self.traci_connected = False
         self.edges = []  # set of rebalancing edges
-        self.nregion = len(self.scenario.G)  # number of regions
+        self.nregion = len(scenario.G)  # number of regions
         for i in self.G:
             self.edges.append((i, i))
             for e in self.G.out_edges(i):
                 self.edges.append(e)
         self.edges = list(set(self.edges))
-        self.nedge = [
-            len(self.G.out_edges(n)) + 1 for n in self.region
-        ]  # number of edges leaving each region
+        self.nedge = [len(self.G.out_edges(n)) + 1 for n in self.region]  # number of edges leaving each region
         for i, j in self.G.edges:
-            self.G.edges[i, j]["time"] = self.rebTime[i, j][self.time]
+            self.G.edges[i, j]['time'] = self.reb_time[i, j][self.time]
             self.rebFlow[i, j] = defaultdict(float)
         for i, j in self.demand:
             self.paxFlow[i, j] = defaultdict(float)
+            self.demand_res[i, j] = defaultdict(dict)  # reservations from sumo assigned to each (origin, destination) pair
         for n in self.region:
-            self.acc[n][0] = self.G.nodes[n]["accInit"]
+            self.acc[n][0] = self.G.nodes[n]['accInit']
             self.dacc[n] = defaultdict(float)
-        self.beta = beta_dict[city] * self.scenario.tstep
-        t = self.time
+        self.beta = beta * scenario.tstep
         self.servedDemand = defaultdict(dict)
         for i, j in self.demand:
             self.servedDemand[i, j] = defaultdict(float)
-
-        self.N = len(self.region)  # total number of cells
-
         # add the initialization of info here
-        self.info = dict.fromkeys(
-            ["revenue", "served_demand", "rebalancing_cost", "operating_cost", "reward"], 0
-        )
+        self.info = dict.fromkeys(['revenue', 'served_demand', 'rebalancing_cost', 'operating_cost'], 0)
         self.reward = 0
-        # observation: current vehicle distribution, time, future arrivals, demand
-        self.obs = (self.acc, self.time, self.dacc, self.demand)
-        self.parser = GNNParser(
-            self, T=6, json_file=self.json_file
-        )  # Timehorizon T=6 (K in paper)
+        self.matching_steps = int(matching_tstep * 60)  # sumo steps between each matching
+        if scenario.is_meso:
+            self.matching_steps -= 1     # In the meso setting one step is done within the reb_step
+ 
+        # observation: current vehicle distribution, time, future arrivals, demand        
+        self.obs = (self.acc, self.time, self.dacc, self.demand) 
+        self.parser = GNNParser(self)
         edge_index = self.parser.get_edge_index()
         self.action_space = gym.spaces.Box(low=0, high=1, shape=(self.nregion, 1), dtype=np.float32)
         self.observation_space_dict = {
-            "node_features": gym.spaces.Box(low=0, high=float('inf'), shape=(self.nregion, 13), dtype=np.float32),
+            "node_features": gym.spaces.Box(low=0, high=float('inf'), shape=(self.nregion, 21), dtype=np.float32),
             "edge_index": gym.spaces.Box(low=0, high=self.nregion, shape=edge_index.shape, dtype=int)
         }
         self.observation_space = gym.spaces.Dict(self.observation_space_dict)
         
-
-    def matching(
-        self, PATH="", directory="saved_files", platform="linux"
-    ):
+    def matching(self, demandAttr=[], PATH='', platime_endorm='linux'):
+        """
+        Matching step method: generation of a flow demand between the nodes of the aggregated net given the input demand
+        and the available taxi from sumo
+        """
+        tstep = self.tstep
         t = self.time
-        demandAttr = [
-            (i, j, self.demand[i, j][t], self.price[i, j][t])
-            for i, j in self.demand
-            if t in self.demand[i, j] and self.demand[i, j][t] > 1e-3
-        ]
-        accTuple = [(n, self.acc[n][t + 1]) for n in self.acc]
-        modPath = os.getcwd().replace("\\", "/") + "/src/cplex_mod/"
-        matchingPath = (
-            os.getcwd().replace("\\", "/")
-            + "/"
-            + str(directory)
-            + "/cplex_logs/matching/"
-            + PATH
-            + "/"
-        )
+        accTuple = [(n, self.acc[n][t + tstep]) for n in self.acc]
+        modPath = os.getcwd().replace('\\', '/') + '/src/cplex_mod/'
+        matchingPath = os.getcwd().replace('\\', '/') + '/saved_files/cplex_logs/matching/' + PATH + '/'
         if not os.path.exists(matchingPath):
             os.makedirs(matchingPath)
-        datafile = matchingPath + "data_{}.dat".format(t)
-        resfile = matchingPath + "res_{}.dat".format(t)
-        with open(datafile, "w") as file:
+        datafile = matchingPath + 'data_{}.dat'.format(t)
+        resfile = matchingPath + 'res_{}.dat'.format(t)
+        with open(datafile, 'w') as file:
             file.write('path="' + resfile + '";\r\n')
-            file.write("demandAttr=" + mat2str(demandAttr) + ";\r\n")
-            file.write("accInitTuple=" + mat2str(accTuple) + ";\r\n")
-        modfile = modPath + "matching.mod"
+            file.write('demandAttr=' + mat2str(demandAttr) + ';\r\n')
+            file.write('accInitTuple=' + mat2str(accTuple) + ';\r\n')
+        modfile = modPath + 'matching.mod'
         my_env = os.environ.copy()
-        if platform == "mac":
+        if platime_endorm == 'mac':
             my_env["DYLD_LIBRARY_PATH"] = CPLEXPATH
         else:
             my_env["LD_LIBRARY_PATH"] = CPLEXPATH
-        out_file = matchingPath + "out_{}.dat".format(t)
-        with open(out_file, "w") as output_f:
-            subprocess.check_call(
-                [CPLEXPATH + "oplrun", modfile, datafile], stdout=output_f, env=my_env
-            )
+        out_file = matchingPath + 'out_{}.dat'.format(t)
+        with open(out_file, 'w') as output_f:
+            subprocess.check_call([CPLEXPATH + "oplrun", modfile, datafile], stdout=output_f, env=my_env)
         output_f.close()
         flow = defaultdict(float)
-        with open(resfile, "r", encoding="utf8") as file:
+        with open(resfile, 'r', encoding="utf8") as file:
             for row in file:
-                item = row.replace("e)", ")").strip().strip(";").split("=")
-                if item[0] == "flow":
-                    values = item[1].strip(")]").strip("[(").split(")(")
+                item = row.replace('e)', ')').strip().strip(';').split('=')
+                if item[0] == 'flow':
+                    values = item[1].strip(')]').strip('[(').split(')(')
                     for v in values:
                         if len(v) == 0:
                             continue
-                        i, j, f = v.split(",")
+                        i, j, f = v.split(',')
                         flow[int(i), int(j)] = float(f)
         paxAction = [flow[i, j] if (i, j) in flow else 0 for i, j in self.edges]
         return paxAction
 
-    # pax step
-    def pax_step(
-        self,
-        paxAction=None,
-        directory="saved_files",
-        PATH="",
-        platform="linux",
-    ):
+    def pax_step(self, paxAction=None, PATH='', platime_endorm='linux'):
+        sumo_step = 0
+        while sumo_step < self.matching_steps:
+            traci.simulationStep()
+            sumo_step += 1  
+        tstep = self.tstep
+        self.time = int(((traci.simulation.getTime() - self.scenario.time_start * 60) // 60) - tstep)
         t = self.time
         self.reward = 0
-        self.ext_reward = np.zeros(self.nregion)
-        for i in self.region:
-            self.acc[i][t + 1] = self.acc[i][t]
-        self.info["served_demand"] = 0  # initialize served demand
+        # Step info dictionary initialization
+        self.info['served_demand'] = 0  # initialize served demand
         self.info["operating_cost"] = 0  # initialize operating cost
-        self.info["revenue"] = 0
-        self.info["rebalancing_cost"] = 0
-        self.info["reward"] = 0
-        if (
-            paxAction is None
-        ):  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
-            paxAction = self.matching(
-                directory=directory, PATH=PATH, platform=platform
-            )
+        self.info['revenue'] = 0
+        self.info['rebalancing_cost'] = 0
+        self.info['reward'] = 0
+        # Matching step
+        demandAttr = self.get_demand_attr()
+        if paxAction is None:  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
+            # Taxis information
+            taxi_ids = traci.vehicle.getTaxiFleet(0)
+            self.set_taxi_to_region(taxi_ids)
+            # Info initialization
+            for i in self.region:
+                num_taxis = len(self.regions_sumo[i]['taxis'])
+                self.acc[i][t + tstep] = num_taxis
+            paxAction = self.matching(demandAttr=demandAttr, PATH=PATH, platime_endorm=platime_endorm)
         self.paxAction = paxAction
-        # serving passengers
-
+        # Serving passengers
         for k in range(len(self.edges)):
             i, j = self.edges[k]
-            if (
-                (i, j) not in self.demand
-                or t not in self.demand[i, j]
-                or self.paxAction[k] < 1e-3
-            ):
+            if (i, j) not in self.demand or t not in self.demand[i, j] or self.paxAction[k] < 1e-3:
                 continue
             # I moved the min operator above, since we want paxFlow to be consistent with paxAction
-            self.paxAction[k] = min(self.acc[i][t + 1], paxAction[k])
-            assert paxAction[k] < self.acc[i][t + 1] + 1e-3
+            assert paxAction[k] < self.acc[i][t + tstep] + 1e-3
+            self.paxAction[k] = min(self.acc[i][t + tstep], int(paxAction[k]))
             self.servedDemand[i, j][t] = self.paxAction[k]
-            self.paxFlow[i, j][t + self.demandTime[i, j][t]] = self.paxAction[k]
-            self.info["operating_cost"] += (
-                self.demandTime[i, j][t] * self.beta * self.paxAction[k]
-            )
-            self.acc[i][t + 1] -= self.paxAction[k]
-            self.info["served_demand"] += self.servedDemand[i, j][t]
-            self.dacc[j][t + self.demandTime[i, j][t]] += self.paxFlow[i, j][
-                t + self.demandTime[i, j][t]
-            ]
-            self.reward += self.paxAction[k] * (
-                self.price[i, j][t] - self.demandTime[i, j][t] * self.beta
-            )
-            self.ext_reward[i] += max(
-                0,
-                self.paxAction[k]
-                * (self.price[i, j][t] - self.demandTime[i, j][t] * self.beta),
-            )
-            self.info["revenue"] += self.paxAction[k] * (self.price[i, j][t])
+            self.info['served_demand'] += self.servedDemand[i, j][t]
+            self.acc[i][t + tstep] -= self.paxAction[k]
+            self.info['revenue'] += self.paxAction[k] * (self.price[i, j][t])
+            # SUMO taxi dispatch
+            taxi_match = 0
+            while taxi_match < self.paxAction[k]:
+                taxi_num = 0
+                reservation = self.demand_res[i, j][t][taxi_match]
+                reservation_id = reservation.id
+                persons = reservation.persons[0]
+                edge_o = reservation.fromEdge
+                edge_d = reservation.toEdge
+                taxi = self.regions_sumo[i]['taxis'][taxi_num]
+                taxi_id = taxi[0]
+                # Direction check
+                edge = traci.vehicle.getRoadID(taxi_id)
+                while edge[1].isdigit != edge_o[1].isdigit:
+                    if taxi_num == len(self.regions_sumo[i]['taxis']) - 1:
+                        taxi = self.regions_sumo[i]['taxis'][0]
+                        taxi_id = taxi[0]
+                        break
+                    taxi_num += 1
+                    taxi = self.regions_sumo[i]['taxis'][taxi_num]
+                    taxi_id = taxi[0]
+                    edge = traci.vehicle.getRoadID(taxi_id)
+                # Dispatch and taxi remove from the region
+                traci.vehicle.dispatchTaxi(taxi_id, [reservation_id])
+                route = traci.simulation.findRoute(edge_o, edge_d, vType='taxi')
+                self.regions_sumo[i]['taxis'].remove(taxi)
+                self.reservations_assigned.append([reservation_id, persons, taxi_id])
+                # Find taxi travel time and travel info computation
+                demand_time = int(math.ceil(route.travelTime / (traci.vehicle.getSpeedFactor(taxi_id) * 60)))
+                arrival_time = t + demand_time      # Use the speed factor to have a more accurate forecast of the travel time
+                if arrival_time % tstep != 0:
+                    arrival_time = (arrival_time // tstep + 1) * tstep
+                self.paxFlow[i, j][arrival_time] += 1
+                self.dacc[j][arrival_time] += 1
+                self.info["operating_cost"] += demand_time * self.beta
+                self.reward += (self.price[i, j][t] - demand_time * self.beta)
+                taxi_match += 1
 
-        self.obs = (
-            self.acc,
-            self.time,
-            self.dacc,
-            self.demand,
-        )  # for acc, the time index would be t+1, but for demand, the time index would be t
+        self.obs = (self.acc, self.time, self.dacc, self.demand)  # for acc, the time index would be t+1, but for demand, the time index would be t
         done = False  # if passenger matching is executed first
-        ext_done = [done] * self.nregion
         self.info["reward"] += max(0, self.reward)
-        return self.obs, max(0, self.reward), done, self.info, self.ext_reward, ext_done
+        return self.obs, max(0, self.reward), done, self.info
 
-    # reb step
     def reb_step(self, rebAction):
+        tstep = self.tstep
         t = self.time
         self.reward = 0  # reward is calculated from before this to the next rebalancing, we may also have two rewards, one for pax matching and one for rebalancing
-        self.ext_reward = np.zeros(self.nregion)
+        self.info['rebalanced_vehicles'] = 0
         self.rebAction = rebAction
         # rebalancing
+        reb_assign = list()
         for k in range(len(self.edges)):
             i, j = self.edges[k]
-            if (i, j) not in self.G.edges:
+            if (i, j) not in self.G.edges or self.rebAction[k] < 1e-3:
                 continue
+            assert rebAction[k] < self.acc[i][t + tstep] + 1e-3
             # TODO: add check for actions respecting constraints? e.g. sum of all action[k] starting in "i" <= self.acc[i][t+1] (in addition to our agent action method)
             # update the number of vehicles
-            self.rebAction[k] = min(self.acc[i][t + 1], rebAction[k])
-            self.rebFlow[i, j][t + self.rebTime[i, j][t]] = self.rebAction[k]
-            self.acc[i][t + 1] -= self.rebAction[k]
-            self.dacc[j][t + self.rebTime[i, j][t]] += self.rebFlow[i, j][
-                t + self.rebTime[i, j][t]
-            ]
-            self.info["rebalancing_cost"] += (
-                self.rebTime[i, j][t] * self.beta * self.rebAction[k]
-            )
-            self.info["operating_cost"] += (
-                self.rebTime[i, j][t] * self.beta * self.rebAction[k]
-            )
-            self.reward -= self.rebTime[i, j][t] * self.beta * self.rebAction[k]
-            self.ext_reward[i] -= self.rebTime[i, j][t] * self.beta * self.rebAction[k]
-        # arrival for the next time step, executed in the last state of a time step
-        # this makes the code slightly different from the previous version, where the following codes are executed between matching and rebalancing
-        for k in range(len(self.edges)):
-            i, j = self.edges[k]
-            if (i, j) in self.rebFlow and t in self.rebFlow[i, j]:
-                self.acc[j][t + 1] += self.rebFlow[i, j][t]
-            if (i, j) in self.paxFlow and t in self.paxFlow[i, j]:
-                self.acc[j][t + 1] += self.paxFlow[i, j][
-                    t
-                ]  # this means that after pax arrived, vehicles can only be rebalanced in the next time step, let me know if you have different opinion
+            self.rebAction[k] = min(self.acc[i][t + tstep], int(rebAction[k]))
+            self.acc[i][t + tstep] -= self.rebAction[k]
+            self.info['rebalanced_vehicles'] += self.rebAction[k]
+            # SUMO travels assignment
+            taxis_reb = 0
+            while taxis_reb < self.rebAction[k]:
+                taxi = self.regions_sumo[i]['taxis'][0]
+                taxi_id = taxi[0]
+                edge_d = self.regions_sumo[j]['in_edges'][np.random.randint(len(self.regions_sumo[j]['in_edges']))].getID()
+                edge_d_length = traci.lane.getLength(edge_d + '_0')
+                edge_o = traci.vehicle.getRoadID(taxi_id)
+                route = traci.simulation.findRoute(edge_o, edge_d, vType='taxi', routingMode=1)
+                reb_time = int(math.ceil(route.travelTime / (traci.vehicle.getSpeedFactor(taxi_id) * 60)))
+                arrival_time = t + reb_time      # Use the speed factor to have a more accurate forecast of the travel time
+                if arrival_time % tstep != 0:
+                    arrival_time = (arrival_time // tstep + 1) * tstep
+                if self.scenario.is_meso:
+                    edge_o_length = traci.lane.getLength(edge_o + '_0')
+                    reb_id = taxi_id + 'o' + str(i) + 'd' + str(j) + '#' + str(taxis_reb) + '_rebalancing'
+                    traci.person.add(personID=reb_id, edgeID=edge_o, pos=edge_o_length)
+                    traci.person.appendDrivingStage(personID=reb_id, toEdge=edge_d, lines='taxi')
+                    reb_assign.append((taxi_id, reb_id))
+                else:
+                    traci.vehicle.resume(taxi_id)
+                    traci.vehicle.setRoute(taxi_id, route.edges)
+                    traci.vehicle.setStop(taxi_id, edge_d, pos=edge_d_length, flags=1)  # Set the stop in the new location
+                    traci.vehicle.setStopParameter(taxi_id, 0, 'actType', 'rebalancing')  # Set the taxi condition to rebalancing
 
-        self.obs = (
-            self.acc,
-            self.time + 1,
-            self.dacc,
-            self.demand,
-        )  # use self.time to index the next time step
+                self.regions_sumo[i]['taxis'].remove(taxi)
+                self.rebFlow[i, j][arrival_time] += 1
+                self.dacc[i][arrival_time] += 1
+                self.info['rebalancing_cost'] += reb_time * self.beta
+                self.info["operating_cost"] += reb_time * self.beta
+                self.reward -= reb_time * self.beta
+                taxis_reb += 1
+
+        if self.scenario.is_meso:
+            traci.simulationStep()
+            reservations = traci.person.getTaxiReservations(3)
+            reservation_ids = [r.id for r in reservations]
+            reservation_p = [r.persons[0] for r in reservations]
+            for taxi_id, person_id in reversed(reb_assign):
+                res_id = reservation_ids[reservation_p.index(person_id)]
+                traci.vehicle.dispatchTaxi(taxi_id, [res_id])
+
+        self.obs = (self.acc, self.time, self.dacc, self.demand)  # use self.time to index the next time step
+        # Travel time update from sumo
+        self.update_routes(time=t+tstep)
         for i, j in self.G.edges:
-            self.G.edges[i, j]["time"] = self.rebTime[i, j][self.time + 1]
-        done = self.tf == t + 1  # if the episode is completed
-        ext_done = [done] * self.nregion
+            self.G.edges[i, j]['time'] = self.reb_time[i, j][self.time]
+
+        done = (self.duration == t + tstep)  # if the episode is completed
         self.info["reward"] += self.reward
-        return self.obs, self.reward, done, self.info, self.ext_reward, ext_done
+        return self.obs, self.reward, done, self.info
 
     def step(self, action_rl):
         """
@@ -438,22 +439,28 @@ class AMoD(gym.Env):
             directory="saved_files",
         )
         # take action in environment (rebalancing step)
-        obs, rebreward, done, info, _, _ = self.reb_step(rebAction)
+        obs, rebreward, done, info = self.reb_step(rebAction)
         info_copied = info.copy()
         parsed_obs = self.parser.parse_obs(obs)
         self.time += 1
         # Do matching step
         paxreward = 0
         if not done:
-            obs, paxreward, done, _, _, _ = self.pax_step(
-                PATH=f"scenario_{self.city}", directory="saved_files"
-            )
+            obs, paxreward, done, _ = self.pax_step(
+                PATH=f"scenario_{self.city}" )
             parsed_obs = self.parser.parse_obs(obs)
+        else:
+            self.traci_connected = False
+            traci.close()
         return parsed_obs, (paxreward + rebreward) * self.reward_scale_factor, done, False, info_copied
 
     def reset(self, seed=None):
         # reset the episode
         super().reset(seed=seed)
+        if self.traci_connected:
+            traci.close()
+        self.traci_connected = True
+        traci.start(sumo_cmd)
         self.acc = defaultdict(dict)
         self.dacc = defaultdict(dict)
         self.rebFlow = defaultdict(dict)
@@ -466,17 +473,11 @@ class AMoD(gym.Env):
         self.edges = list(set(self.edges))
         self.demand = defaultdict(dict)  # demand
         self.price = defaultdict(dict)  # price
-        tripAttr = self.scenario.get_random_demand(reset=True)
+        self.demand_res = defaultdict(dict)  # demand with reservations from sumo
+        self.reservations_assigned = list()  # reservation assigned during the episode
+        trip_attr = self.scenario.get_random_demand()
         self.regionDemand = defaultdict(dict)
-        for (
-            i,
-            j,
-            t,
-            d,
-            p,
-        ) in (
-            tripAttr
-        ):  # trip attribute (origin, destination, time of request, demand, price)
+        for i, j, t, d, p in trip_attr:  # trip attribute (origin, destination, time of request, demand, price)
             self.demand[i, j][t] = d
             self.price[i, j][t] = p
             if t not in self.regionDemand[i]:
@@ -484,318 +485,461 @@ class AMoD(gym.Env):
             else:
                 self.regionDemand[i][t] += d
 
+        for n in self.region:
+            self.demand[n, n] = {t: 0 for t in range(self.duration + self.scenario.thorizon)}
+            self.price[n, n] = {t: self.scenario.price[n, n][t] for t in range(self.duration + self.scenario.thorizon)}
+
         self.time = 0
         for i, j in self.G.edges:
             self.rebFlow[i, j] = defaultdict(float)
             self.paxFlow[i, j] = defaultdict(float)
-        for n in self.G:
-            self.acc[n][0] = self.G.nodes[n]["accInit"]
-            self.dacc[n] = defaultdict(float)
-        t = self.time
-        for i, j in self.demand:
+            self.demand_res[i, j] = defaultdict(dict)
             self.servedDemand[i, j] = defaultdict(float)
+            if (i, j) in self.taxi_routes:
+                self.demand_time[i, j][0] = self.taxi_routes[(i, j)][2] / 60
+                self.demand_time[i, j][0] = max(int(math.ceil(self.demand_time[i, j][0])), 1)
+                self.reb_time[i, j][0] = self.demand_time[i, j][0]
+            else:
+                self.demand_time[i, j][0] = 0
+                self.reb_time[i, j][0] = 0
+
+        for n in self.G:
+            self.acc[n][0] = self.G.nodes[n]['accInit']
+            self.dacc[n] = defaultdict(float)
+            self.regions_sumo[n]['taxis'] = list()
+
+        # Initialize taxis in the network
+        self.scenario.set_taxi_lines()
+        self.scenario.set_taxi_distribution()
+
+        # TODO: define states here
         self.obs = (self.acc, self.time, self.dacc, self.demand)
-        obs, paxreward, done, info, _, _ = self.pax_step(
-            PATH=f"scenario_{self.city}", directory="saved_files"
+        if 'meso' in net_file:
+            traci.simulationStep()
+        obs, paxreward, done, info = self.pax_step(
+            PATH=f"scenario_{self.city}"
         )
         self.reward = 0
         return self.parser.parse_obs(obs), {}
 
+    def get_demand_attr(self):
+        """
+        Method to set the demand for each time step to be satisfied through the matching step
+        """
+        tstep = self.tstep
+        t = self.time
+        # Get the reservations demand
+        self.reservations = list()
+        reservations = traci.person.getTaxiReservations(3)  # Consider only the retrived reservations (the reservation in progress are not appended)
+        demandAttr = []
+        trips = []
+        for trip in reservations:
+            trip_id = trip.id
+            persons = trip.persons[0]
+            if not persons:
+                continue
+            o = int(persons[(persons.find('o') + 1):persons.find('d')])
+            d = int(persons[(persons.find('d') + 1):persons.find('#')])
+            price = self.price[o, d][t]
+            state = trip.state
+            if state >= 4:
+                continue
+            # Condition to increase the flow if the same trip demand is present in the reservations list
+            if not (o, d) in trips:
+                trips.append((o, d))
+                demandAttr.append((o, d, 1, price))
+            else:
+                demandAttr[trips.index((o, d))] = (o, d, demandAttr[trips.index((o, d))][2] + 1, price)
+            if not trip in self.reservations:
+                self.reservations.append(trip)
+                if not self.demand_res[o, d][t]:
+                    self.demand_res[o, d][t] = [trip]
+                else:
+                    self.demand_res[o, d][t].append(trip)
+        return demandAttr
+
+    def update_routes(self, time):
+        """
+        Method to update the travel time in the network
+        """
+        new_routes = defaultdict(tuple)
+        for o, d in self.edges:
+            # Get travel time from the o-d route from the sumo net
+            if (o, d) in self.taxi_routes:
+                edge_o = self.taxi_routes[(o, d)][0][0]
+                edge_d = self.taxi_routes[(o, d)][0][1]
+                route = traci.simulation.findRoute(edge_o, edge_d, vType='taxi', depart=traci.simulation.getTime(), routingMode=1)
+                new_routes[(o, d)] = ((edge_o, edge_d), route.edges, route.travelTime)
+                self.demand_time[o, d][time] = new_routes[(o, d)][2] / 60
+                self.demand_time[o, d][time] = max(int(math.ceil(self.demand_time[o, d][time])), 1)
+                self.reb_time[o, d][time] = self.demand_time[o, d][time]
+            else:
+                self.demand_time[o, d][time] = 0
+                self.reb_time[o, d][time] = 0
+        self.taxi_routes = new_routes
+
+    def set_taxi_to_region(self, taxi_ids):
+        """
+        Method to assign the avaiable taxi to the relative region
+        """
+        for taxi_id in taxi_ids:
+            stop = traci.vehicle.getStops(taxi_id)
+            stop_info = stop[0].actType
+            # Ignore in-rebalancing taxis
+            if stop_info == 'rebalancing':
+                parking = self.check_parking(taxi_id, stop)
+                if not parking:
+                    continue
+            position = traci.vehicle.getPosition(taxi_id)
+            region = self.scenario.cluster_alg.predict(np.array(position).reshape(1, -1))
+            if not (taxi_id, stop_info) in self.regions_sumo[region[0]]['taxis']:
+                self.regions_sumo[region[0]]['taxis'].append((taxi_id, stop_info))
+
+    def check_parking(self, taxi_id, stop):
+        """
+        Method to check if the vehicle is in parking mode
+        """
+        if self.scenario.is_meso:
+            stop_edge = stop[0].lane.split('_')[0]
+            taxi_edge = traci.vehicle.getRoadID(taxi_id)
+            taxi_spd = traci.vehicle.getSpeed(taxi_id)
+            if stop_edge == taxi_edge and taxi_spd == 0:
+                return True
+            else:
+                return False
+        else:
+            return traci.vehicle.isStoppedParking(taxi_id)
 
 class Scenario:
-    def __init__(
-        self,
-        N1=2,
-        N2=4,
-        tf=60,
-        sd=None,
-        ninit=5,
-        tripAttr=None,
-        demand_input=None,
-        demand_ratio=None,
-        trip_length_preference=0.25,
-        grid_travel_time=1,
-        fix_price=True,
-        alpha=0.2,
-        json_file=None,
-        json_hr=9,
-        json_tstep=2,
-        varying_time=False,
-        json_regions=None,
-    ):
-        # trip_length_preference: positive - more shorter trips, negative - more longer trips
-        # grid_travel_time: travel time between grids
-        # demand_input： list - total demand out of each region,
-        #          float/int - total demand out of each region satisfies uniform distribution on [0, demand_input]
-        #          dict/defaultdict - total demand between pairs of regions
-        # demand_input will be converted to a variable static_demand to represent the demand between each pair of nodes
-        # static_demand will then be sampled according to a Poisson distribution
-        # alpha: parameter for uniform distribution of demand levels - [1-alpha, 1+alpha] * demand_input
+    def __init__(self, num_cluster=4, duration=2, sd=None, demand_ratio=None, json_file=None, time_start=7,
+            time_horizon=10, tstep=2, varying_time=False, json_regions=None, sumo_net_file=None, acc_init=100):
+        """
+        Method to initialize the scenario for the AMoD problem with the following features
+            demand_input will be converted to a variable static_demand to represent the demand between each pair of nodes
+            static_demand will then be sampled according to a Poisson distribution
+            alpha: parameter for uniform distribution of demand levels - [1-alpha, 1+alpha] * demand_input
+        """
         self.sd = sd
         if sd != None:
             np.random.seed(self.sd)
-        if json_file == None:
-            self.varying_time = varying_time
-            self.is_json = False
-            self.alpha = alpha
-            self.trip_length_preference = trip_length_preference
-            self.grid_travel_time = grid_travel_time
-            self.demand_input = demand_input
-            self.fix_price = fix_price
-            self.N1 = N1
-            self.N2 = N2
-            self.G = nx.complete_graph(N1 * N2)
-            self.G = self.G.to_directed()
-            self.demandTime = dict()
-            self.rebTime = dict()
-            self.edges = list(self.G.edges) + [(i, i) for i in self.G.nodes]
-            for i, j in self.edges:
-                self.demandTime[i, j] = defaultdict(
-                    lambda: (abs(i // N1 - j // N1) + abs(i % N1 - j % N1))
-                    * grid_travel_time
-                )
-                self.rebTime[i, j] = defaultdict(
-                    lambda: (abs(i // N1 - j // N1) + abs(i % N1 - j % N1))
-                    * grid_travel_time
-                )
 
-            for n in self.G.nodes:
-                self.G.nodes[n]["accInit"] = int(ninit)
-            self.tf = tf
-            self.demand_ratio = defaultdict(list)
+        # Aggregated net creation
+        self.N = num_cluster
+        if sumo_net_file is None:
+            sumo_net_file = 'data/LuSTScenario/lust.net.xml'
 
-            if demand_ratio == None or type(demand_ratio) == list:
-                for i, j in self.edges:
-                    if type(demand_ratio) == list:
-                        self.demand_ratio[i, j] = (
-                            list(
-                                np.interp(
-                                    range(0, tf),
-                                    np.arange(0, tf + 1, tf / (len(demand_ratio) - 1)),
-                                    demand_ratio,
-                                )
-                            )
-                            + [demand_ratio[-1]] * tf
-                        )
-                    else:
-                        self.demand_ratio[i, j] = [1] * (tf + tf)
-            else:
-                for i, j in self.edges:
-                    if (i, j) in demand_ratio:
-                        self.demand_ratio[i, j] = (
-                            list(
-                                np.interp(
-                                    range(0, tf),
-                                    np.arange(
-                                        0, tf + 1, tf / (len(demand_ratio[i, j]) - 1)
-                                    ),
-                                    demand_ratio[i, j],
-                                )
-                            )
-                            + [1] * tf
-                        )
-                    else:
-                        self.demand_ratio[i, j] = (
-                            list(
-                                np.interp(
-                                    range(0, tf),
-                                    np.arange(
-                                        0,
-                                        tf + 1,
-                                        tf / (len(demand_ratio["default"]) - 1),
-                                    ),
-                                    demand_ratio["default"],
-                                )
-                            )
-                            + [1] * tf
-                        )
-            if self.fix_price:  # fix price
-                self.p = defaultdict(dict)
-                for i, j in self.edges:
-                    self.p[i, j] = (np.random.rand() * 2 + 1) * (
-                        self.demandTime[i, j][0] + 1
-                    )
-            if tripAttr != None:  # given demand as a defaultdict(dict)
-                self.tripAttr = deepcopy(tripAttr)
-            else:
-                self.tripAttr = self.get_random_demand()  # randomly generated demand
-        else:
-            self.varying_time = varying_time
-            self.is_json = True
-            with open(json_file, "r") as file:
-                data = json.load(file)
-            self.tstep = json_tstep
-            self.N1 = data["nlat"]
-            self.N2 = data["nlon"]
-            self.demand_input = defaultdict(dict)
-            self.json_regions = json_regions
+        self.is_meso = 'meso' in sumo_net_file
+        self.sumo_net = sumolib.net.readNet(sumo_net_file)
+        self.regions_sumo, self.cluster_alg = self.sumo_net_clustering()
+        self.taxi_routes = self.get_taxi_routes()
+        self.G = nx.complete_graph(self.N)
+        self.G = self.G.to_directed()
+        self.edges = list(self.G.edges) + [(i, i) for i in self.G.nodes]
+        self.acc_init = acc_init  # Initial vehicle distribution per node (Settato esternamente dal main e non più dal json)
+        for n in self.G.nodes:
+            self.G.nodes[n]['accInit'] = acc_init
 
-            if json_regions != None:
-                self.G = nx.complete_graph(json_regions)
-            elif "region" in data:
-                self.G = nx.complete_graph(data["region"])
-            else:
-                self.G = nx.complete_graph(self.N1 * self.N2)
-            self.G = self.G.to_directed()
-            self.p = defaultdict(dict)
-            self.alpha = 0
-            self.demandTime = defaultdict(dict)
-            self.rebTime = defaultdict(dict)
-            self.json_start = json_hr * 60
-            self.tf = tf
-            self.edges = list(self.G.edges) + [(i, i) for i in self.G.nodes]
+        # Demand creation (from json)
+        self.varying_time = varying_time
+        self.is_json = True
+        with open(json_file, "r") as file:
+            data = json.load(file)
 
-            for i, j in self.demand_input:
-                self.demandTime[i, j] = defaultdict(int)
-                self.rebTime[i, j] = 1
+        self.tstep = tstep
+        self.thorizon = time_horizon
+        self.demand_input = defaultdict(dict)
+        self.json_regions = json_regions
+        self.price = defaultdict(dict)
+        self.alpha = 0
+        self.demand_time = defaultdict(dict)
+        self.reb_time = defaultdict(dict)
+        self.time_start = time_start * 60
+        self.duration = duration * 60
+        # Time demand between nodes initialization
+        for i, j in self.edges:
+            self.demand_time[i, j] = defaultdict(int)
+            self.reb_time[i, j] = defaultdict(int)
+            self.price[i, j] = defaultdict(int)
+            self.demand_input[i, j] = defaultdict(int)
 
-            for item in data["demand"]:
-                t, o, d, v, tt, p = (
-                    item["time_stamp"],
-                    item["origin"],
-                    item["destination"],
-                    item["demand"],
-                    item["travel_time"],
-                    item["price"],
-                )
-                if json_regions != None and (
-                    o not in json_regions or d not in json_regions
-                ):
-                    continue
-                if (o, d) not in self.demand_input:
-                    self.demand_input[o, d], self.p[o, d], self.demandTime[o, d] = (
-                        defaultdict(float),
-                        defaultdict(float),
-                        defaultdict(float),
-                    )
+        # Demand input and prices initialization from the json file (all the available data)
+        for item in data["demand"]:
+            t, o, d, v, p = item["time_stamp"], item["origin"], item["destination"], item["demand"], item["price"]
+            if json_regions != None and (o not in json_regions or d not in json_regions):
+                continue
+            if (o, d) not in self.edges:
+                continue
+            if (o, d) not in self.demand_input:
+                self.demand_input[o, d], self.price[o, d], self.demand_time[o, d] = defaultdict(float), defaultdict(
+                    float), defaultdict(float)
+            # Demand data aggregation based on the tstep
+            self.demand_input[o, d][(t - self.time_start) // self.tstep] += v * demand_ratio
+            self.price[o, d][(t - self.time_start) // self.tstep] += p * v * demand_ratio
 
-                self.demand_input[o, d][(t - self.json_start) // json_tstep] += (
-                    v * demand_ratio
-                )
-                self.p[o, d][(t - self.json_start) // json_tstep] += (
-                    p * v * demand_ratio
-                )
-                self.demandTime[o, d][(t - self.json_start) // json_tstep] += (
-                    tt * v * demand_ratio / json_tstep
-                )
-
-            for o, d in self.edges:
-                for t in range(0, tf * 2):
-                    if t in self.demand_input[o, d]:
-                        self.p[o, d][t] /= self.demand_input[o, d][t]
-                        self.demandTime[o, d][t] /= self.demand_input[o, d][t]
-                        self.demandTime[o, d][t] = max(
-                            int(round(self.demandTime[o, d][t])), 1
-                        )
-                    else:
-                        self.demand_input[o, d][t] = 0
-                        self.p[o, d][t] = 0
-                        self.demandTime[o, d][t] = 0
-
-            for item in data["rebTime"]:
-                hr, o, d, rt = (
-                    item["time_stamp"],
-                    item["origin"],
-                    item["destination"],
-                    item["reb_time"],
-                )
-                if json_regions != None and (
-                    o not in json_regions or d not in json_regions
-                ):
-                    continue
-                if varying_time:
-                    t0 = int((hr * 60 - self.json_start) // json_tstep)
-                    t1 = int((hr * 60 + 60 - self.json_start) // json_tstep)
-                    for t in range(t0, t1):
-                        self.rebTime[o, d][t] = max(int(round(rt / json_tstep)), 1)
+        # Demand time and prices update for the effective nodes in the net and the effective episode duration
+        for o, d in self.edges:
+            # Get travel time from the o-d route from the sumo net
+            for t in range(0, self.time_start + self.duration + self.thorizon):
+                if (o, d) in self.taxi_routes:
+                    self.demand_time[o, d][t] = self.taxi_routes[(o, d)][2] / 60
+                    self.demand_time[o, d][t] = max(int(math.ceil(self.demand_time[o, d][t])), 1)
+                    self.reb_time[o, d][t] = self.demand_time[o, d][t]
                 else:
-                    if hr == json_hr:
-                        for t in range(0, tf + 1):
-                            self.rebTime[o, d][t] = max(int(round(rt / json_tstep)), 1)
+                    self.demand_time[o, d][t] = 0
+                    self.reb_time[o, d][t] = 0
+                if t in self.demand_input[o, d]:
+                    self.price[o, d][t] /= self.demand_input[o, d][t]
+                else:
+                    self.demand_input[o, d][t] = 0
+                    self.price[o, d][t] = 0
 
-            for item in data["totalAcc"]:
-                hr, acc = item["hour"], item["acc"]
-                if hr == json_hr + int(round(json_tstep / 2 * tf / 60)):
-                    for n in self.G.nodes:
-                        self.G.nodes[n]["accInit"] = int(acc / len(self.G))
+        # Create the taxi initialization routes xml file
+        # self.set_taxi_init_xml()
 
-            self.tripAttr = self.get_random_demand()
+    def sumo_net_clustering(self):
+        """
+        Function to cluster the junctions of a SUMO net, once a .sumocgf file has been started
+        """
+        # Nodes id and position
+        nodes = self.sumo_net.getNodes()
+        nodes_id = list()
+        nodes_pos = list()
+        for node in nodes:
+            nodes_id.append(node.getID())
+            nodes_pos.append(node.getCoord())
 
-    def get_random_demand(self, reset=False):
-        # generate demand and price
-        # reset = True means that the function is called in the reset() method of AMoD enviroment,
-        #   assuming static demand is already generated
-        # reset = False means that the function is called when initializing the demand
+        # Clustering
+        kmeans = KMeans(n_clusters=self.N, random_state=0)
+        kmeans.fit(np.array(nodes_pos))
+        labels = kmeans.labels_
+        regions_sumo = list()
+        for region in range(self.N):
+            nodes_cluster = []
+            nodes_id_cluster = []
+            nodes_pos_cluster = []
+            cluster_center = kmeans.cluster_centers_[region]
+            for idx in range(len(nodes_pos)):
+                if labels[idx] == region:
+                    nodes_cluster.append(nodes[idx])
+                    nodes_id_cluster.append(nodes_id[idx])
+                    nodes_pos_cluster.append(nodes_pos[idx])
 
+            distance = np.linalg.norm(np.array(nodes_pos_cluster) - cluster_center, axis=1)
+            # Terminal edges correction and urban center selection
+            is_urban = False
+            while not is_urban:
+                is_urban = True
+                min_idx = np.argmin(distance)
+                node = nodes_cluster[min_idx]
+                in_edges = node.getIncoming()
+                out_edges = node.getOutgoing()
+                if node.getType() == 'dead_end':
+                    distance[min_idx] = math.inf
+                    is_urban = False
+                    continue
+
+                for in_edge in in_edges:
+                    if not in_edge.getIncoming():
+                        in_edges.remove(in_edge)
+                    if 'motorway' in in_edge.getType():
+                        distance[min_idx] = math.inf
+                        is_urban = False
+
+                for out_edge in out_edges:
+                    if not out_edge.getOutgoing():
+                        out_edges.remove(out_edge)
+                    if 'motorway' in out_edge.getType():
+                        distance[min_idx] = math.inf
+                        is_urban = False
+
+            regions_sumo.append({'id': nodes_id_cluster, 'position': np.array(nodes_pos_cluster),
+                                 'id_center': node.getID(), 'position_center': nodes_pos_cluster[min_idx],
+                                 'in_edges': in_edges,
+                                 'out_edges': out_edges,
+                                 'taxis': []}
+                                )
+
+        # Cluster centers edges
+        return regions_sumo, kmeans
+
+    def set_taxi_init_xml(self):
+        """
+        Method to create a .xml file with the initialization routes for the nodes in the net
+        """
+        routes = ET.Element('routes')
+        for node in self.G.nodes:
+            for edge_o in self.regions_sumo[node]['in_edges']:
+                for edge_d in self.regions_sumo[node]['out_edges']:
+                    edges = [edge_o.getID(), edge_d.getID()]
+                    route_id = edge_o.getID() + edge_d.getID() + 'init'
+                    route = ET.SubElement(routes, 'route')
+                    route.set('edges', " ".join(edges))
+                    route.set('id', route_id)
+        tree = ET.ElementTree(routes)
+        tree.write("data/LuSTScenario/input/routes/taxi_initialization.rou.xml", xml_declaration=True, pretty_print=True)
+
+    def get_taxi_routes(self):
+        """
+        Method to compute the shortest route given the center of an aggregated net and save a .xml with the trip
+        """
+        # Cluster centers edges
+        taxi_routes = defaultdict(tuple)
+        routes = list(combinations(list(range(len(self.regions_sumo))), 2))
+        for o, d in routes:
+            taxi_routes[(o, d)] = (None, None, float('inf'))
+            for edge_o in self.regions_sumo[o]['out_edges']:
+                for edge_d in self.regions_sumo[d]['in_edges']:
+                    route = self.sumo_net.getOptimalPath(edge_o, edge_d, fastest=True)
+                    if route[1] < taxi_routes[(o, d)][2]:
+                        taxi_routes[(o, d)] = (
+                            (route[0][0].getID(), route[0][-1].getID()), route[0], route[1])
+            # Add the way back
+            edge_o = taxi_routes[(o, d)][0][1]
+            edge_d = taxi_routes[(o, d)][0][0]
+            # Edge correction for the backward road
+            if edge_o[1].isdigit():
+                edge_o = edge_o[1:]
+            else:
+                edge_o = edge_o[2:]
+            edge_found = False
+            for edge in self.regions_sumo[d]['out_edges']:
+                if edge_o in edge.getID():
+                    edge_o = edge.getID()
+                    edge_found = True
+                    break
+            if not edge_found:
+                edge_o = self.regions_sumo[d]['out_edges'][0].getID()
+
+            if edge_d[1].isdigit():
+                edge_d = edge_d[1:]
+            else:
+                edge_d = edge_d[2:]
+            edge_found = False
+            for edge in self.regions_sumo[o]['in_edges']:
+                if edge_d in edge.getID():
+                    edge_d = edge.getID()
+                    edge_found = True
+                    break
+            if not edge_found:
+                edge_d = self.regions_sumo[o]['in_edges'][0].getID()
+
+            ids = [edge.getID() for edge in self.regions_sumo[d]['out_edges']]
+            edge_o = self.regions_sumo[d]['out_edges'][ids.index(edge_o)]
+            ids = [edge.getID() for edge in self.regions_sumo[o]['in_edges']]
+            edge_d = self.regions_sumo[o]['in_edges'][ids.index(edge_d)]
+            route = self.sumo_net.getOptimalPath(edge_o, edge_d, fastest=True)
+            try:
+                taxi_routes[(d, o)] = ((route[0][0].getID(), route[0][-1].getID()), route[0], route[1])
+            except Exception as e:
+                raise RuntimeError(f"Route from {d} to {o} not found: please reduce the number of regions")
+
+        taxi_routes = defaultdict(tuple, sorted(taxi_routes.items(), key=lambda x: x[0]))
+        return taxi_routes
+
+    def get_random_demand(self):
+        """
+        generate demand and price
+        reset = True means that the function is called in the reset() method of AMoD enviroment,
+        assuming static demand is already generated
+        reset = False means that the function is called when initializing the demand
+        In the same method a .xml file is generated and it will be loaded in SUMO
+        """
         demand = defaultdict(dict)
         price = defaultdict(dict)
-        tripAttr = []
+        trip_attr = []
 
         # converting demand_input to static_demand
         # skip this when resetting the demand
         # if not reset:
         if self.is_json:
-            for t in range(0, self.tf * 2):
+            for t in range(0, (self.duration + self.thorizon) // self.tstep):
+                t *= self.tstep
+                t0 = (self.time_start + t) * 60  # [s]
+                tf = (self.time_start + t + self.tstep) * 60
                 for i, j in self.edges:
                     if (i, j) in self.demand_input and t in self.demand_input[i, j]:
                         demand[i, j][t] = np.random.poisson(self.demand_input[i, j][t])
-                        price[i, j][t] = self.p[i, j][t]
+                        price[i, j][t] = self.price[i, j][t]
+                        if i == j:
+                            demand[i, j][t] = 0
+                            continue
+                        if demand[i, j][t] > 0:
+                            edge_o = self.regions_sumo[i]['out_edges'][np.random.randint(len(self.regions_sumo[i]['out_edges']))].getID()
+                            edge_d = self.regions_sumo[j]['in_edges'][np.random.randint(len(self.regions_sumo[j]['in_edges']))].getID()
+                            edge_o_length = traci.lane.getLength(edge_o + '_0')
+                            person_id = 'p' + str(t) + 'o' + str(i) + 'd' + str(j) + '#'
+                            depart_time = np.random.randint(t0, tf)  # Time instant at which the person appears in the network
+                            for person_num in range(demand[i, j][t]):
+                                person_id = person_id + str(person_num)
+                                traci.person.add(personID=person_id, edgeID=edge_o, depart=depart_time, pos=edge_o_length)
+                                traci.person.setColor(typeID=person_id, color=(237, 177, 32))
+                                traci.person.appendDrivingStage(personID=person_id, toEdge=edge_d, lines='taxi')
                     else:
                         demand[i, j][t] = 0
                         price[i, j][t] = 0
-                    tripAttr.append((i, j, t, demand[i, j][t], price[i, j][t]))
+
+                    trip_attr.append((i, j, t, demand[i, j][t], price[i, j][t]))
         else:
             self.static_demand = dict()
-            region_rand = np.random.rand(len(self.G)) * self.alpha * 2 + 1 - self.alpha
+            region_rand = (np.random.rand(len(self.G)) * self.alpha * 2 + 1 - self.alpha)
             if type(self.demand_input) in [float, int, list, np.array]:
+
                 if type(self.demand_input) in [float, int]:
                     self.region_demand = region_rand * self.demand_input
                 else:
                     self.region_demand = region_rand * np.array(self.demand_input)
                 for i in self.G.nodes:
                     J = [j for _, j in self.G.out_edges(i)]
-                    prob = np.array(
-                        [
-                            np.math.exp(
-                                -self.rebTime[i, j][0] * self.trip_length_preference
-                            )
-                            for j in J
-                        ]
-                    )
+                    prob = np.array([np.math.exp(-self.reb_time[i, j][0] * self.trip_length_preference) for j in J])
                     prob = prob / sum(prob)
                     for idx in range(len(J)):
-                        self.static_demand[i, J[idx]] = (
-                            self.region_demand[i] * prob[idx]
-                        )
+                        self.static_demand[i, J[idx]] = self.region_demand[i] * prob[idx]
             elif type(self.demand_input) in [dict, defaultdict]:
                 for i, j in self.edges:
-                    self.static_demand[i, j] = (
-                        self.demand_input[i, j]
-                        if (i, j) in self.demand_input
-                        else self.demand_input["default"]
-                    )
+                    self.static_demand[i, j] = self.demand_input[i, j] if (i, j) in self.demand_input else \
+                        self.demand_input['default']
 
                     self.static_demand[i, j] *= region_rand[i]
             else:
-                raise Exception(
-                    "demand_input should be number, array-like, or dictionary-like values"
-                )
+                raise Exception("demand_input should be number, array-like, or dictionary-like values")
 
             # generating demand and prices
             if self.fix_price:
-                p = self.p
-            for t in range(0, self.tf * 2):
+                p = self.price
+            for t in range(0, self.duration):
                 for i, j in self.edges:
-                    demand[i, j][t] = np.random.poisson(
-                        self.static_demand[i, j] * self.demand_ratio[i, j][t]
-                    )
+                    demand[i, j][t] = np.random.poisson(self.static_demand[i, j] * self.demand_ratio[i, j][t])
                     if self.fix_price:
                         price[i, j][t] = p[i, j]
                     else:
-                        price[i, j][t] = (
-                            min(3, np.random.exponential(2) + 1)
-                            * self.demandTime[i, j][t]
-                        )
-                    tripAttr.append((i, j, t, demand[i, j][t], price[i, j][t]))
+                        price[i, j][t] = min(3, np.random.exponential(2) + 1) * self.demand_time[i, j][t]
+                    trip_attr.append((i, j, t, demand[i, j][t], price[i, j][t]))
 
-        return tripAttr
+        print(f'Total demand: {sum([demand[i, j][t] for i, j in demand for t in range(0, self.duration, self.tstep)])}')
+        return trip_attr
+
+    def set_taxi_lines(self):
+        """
+        Method to upload the taxi lines generated in node_routes in sumo
+        """
+
+        for node in self.G.nodes:
+            for edge_o in self.regions_sumo[node]['in_edges']:
+                for edge_d in self.regions_sumo[node]['out_edges']:
+                    route_id = edge_o.getID() + edge_d.getID() + 'init'
+                    traci.route.add(route_id, [edge_o.getID(), edge_d.getID()])
+
+    def set_taxi_distribution(self):
+        """
+        Method to uniformly assign the initial number of taxis in the net to the nodes
+        accInit is the desired initial number of taxi
+        """
+        for node in self.G.nodes:
+            taxi_num = 0
+            while taxi_num < self.acc_init:
+                taxi_id = 'taxi' + str(node) + '#' + str(taxi_num)
+                edge_o = self.regions_sumo[node]['in_edges'][np.random.randint(len(self.regions_sumo[node]['in_edges']))]
+                edge_d = self.regions_sumo[node]['out_edges'][np.random.randint(len(self.regions_sumo[node]['out_edges']))]
+                route_id = edge_o.getID() + edge_d.getID() + 'init'
+                traci.vehicle.add(vehID=taxi_id, typeID='taxi', routeID=route_id)
+                taxi_num += 1
