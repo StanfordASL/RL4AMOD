@@ -15,5 +15,5 @@ To train a model for the network flow problem, you can run `main_network_flow.py
 To train a policy for the autonomous mobility on demand problem, simply run
 python3 `main_amod.py`. By default, this uses a graph convolution network with SAC, but you can change the RL algorithm or network by modifying the variables in main_amod.py. Checkpoints are automatically saved in the amod_checkpoints folder, and validation reward (from deterministic actions) is saved in the amod_runs folder.
 
-<img align="center" src="amod_SAC.png" width="1100"/></td> <br/>
+<img align="center" src="a2c_amod_sumo.png" width="1100"/></td> <br/>
 *Validation reward for the AMoD problem. This was trained on San Francisco, with SAC using a GCN.*
