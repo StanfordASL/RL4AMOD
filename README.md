@@ -1,6 +1,7 @@
 # Coming Soon!
 <img align="center" src="figure.png" width="1500"/></td> <br/>
 
+Video walkthrough: [Drive Folder](https://drive.google.com/drive/folders/1b940gi5vb0ZtDM5PyZBYqlc5NCEw0cpS)
 
 # Codebase
 This repository provides examples of the Bi-Level RL approach, implemented using stable baselines.
