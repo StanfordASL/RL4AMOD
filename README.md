@@ -1,7 +1,6 @@
 # Data-driven Methods for Network-level Coordination of Autonomous Mobility-on-Demand Systems Across Scales
 Official implementation of the [Data-driven Methods for Network-level Coordination of Autonomous Mobility-on-Demand Systems Across Scales](https://rl4amod-itsc24.github.io/) tutorial, presented at 27th IEEE International Conference on Intelligent Transportation Systems 2024
 
-# Coming Soon!
 <img align="center" src="figures/figure.png" width="1500"/></td> <br/>
 
 Join us in moving the first steps toward the creation of publicly available benchmarks, datasets, and simulators for network-level coordination of MoD systems.
