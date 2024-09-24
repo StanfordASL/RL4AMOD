@@ -26,7 +26,7 @@ We aim to provide:
 pip install -r requirements.txt
 ```
 ## Contents
-`amod_complete_repo`  
+`RL4AMOD`  
 `├── testing.py`: test main file<br>
 `├── train.py`: RL agents train main file <br>
 `├── src/`  
