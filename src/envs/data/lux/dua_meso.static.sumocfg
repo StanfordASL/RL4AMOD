@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+Luxembourg SUMO Traffic (LuST) Scenario
+This project is licensed under the terms of the MIT license.
+Author: Lara CODECA [codeca@gmail.com]
+-->
+
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo-sim.org/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="input/lust_meso.net.xml"/>
+	<route-files value="input/routes/local.rou.xml,input/routes/transit.rou.xml"/>
+        <additional-files value="input/add/vtypes.add.xml,input/add/e1detectors.add.xml,input/add/tll.static.xml"/>
+    </input>
+
+    <time>
+        <step-length value="1"/>
+    </time>
+
+    <processing>
+	<no-internal-links value="true"/>
+        <ignore-junction-blocker value="1"/>
+	<ignore-route-errors value="true"/>
+        <time-to-teleport value="600"/>
+        <max-depart-delay value="600"/>
+        <routing-algorithm value="dijkstra"/>
+	<device.rerouting.threads value="8"/>
+	<device.rerouting.mode value="8"/>
+    </processing>
+
+    <routing>
+        <device.rerouting.probability value="0.70"/>
+        <device.rerouting.period value="300"/>
+        <device.rerouting.pre-period value="300"/>
+        <device.taxi.idle-algorithm value="stop"/>
+    </routing>
+
+    <mesoscopic>
+        <mesosim value="true"/>
+        <meso-junction-control value="true"/>
+        <meso-overtaking value="true"/>
+        <meso-multi-queue value="true"/>
+        <meso-lane-queue value="true"/>
+	<meso-edgelength value="100"/>
+        <meso-tauff value="1.45"/>
+        <meso-taufj value="1.45"/>
+        <meso-taujf value="1.45"/>
+        <meso-taujj value="1.45"/>
+        <meso-jam-threshold value="-0.9"/>
+        <meso-tls-penalty value="0.5"/>
+        <meso-minor-penalty value="3"/>
+    </mesoscopic>
+
+</configuration>

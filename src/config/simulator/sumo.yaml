@@ -1,0 +1,39 @@
+name: sumo
+
+sumocfg_file: "dua_meso.static.sumocfg"  # Define the SUMO configuration file
+
+net_file: "input/lust_meso.net.xml" # Define the city network file
+
+seed: 10  # Random seed (default: 10)
+
+demand_ratio: 0.8  # Demand ratio (default: 0.8)
+
+time_start: 7  # Simulation start time in hours (default: 7 hr)
+
+duration: 2  # Episode duration in hours (default: 2 hr)
+
+time_horizon: 10  # Matching steps in the future for demand and arriving vehicle forecast (default: 10 min)
+
+matching_tstep: 1  # Minutes per timestep (default: 1 min)
+
+reb_tstep: 3  # Minutes per timestep (default: 3 min)
+
+sumo_tstep: 1  # Sumo time step (default: 1 s)
+
+max_waiting_time: 10  # Maximum passengers waiting time for a ride (default: 10 min)
+
+beta: 1.0  # Cost of rebalancing (default: 1)
+
+num_regions: 8  # Number of regions for spatial aggregation (default: 8)
+
+random_od: false  # Demand aggregated in the centers of the regions (default: False)
+
+acc_init: 90  # Initial number of taxis per region (default: 90)
+
+city: "lux"  # Defines city to train on
+
+max_steps: 120  # Number of steps per episode (default: T=120)
+
+cplexpath: "/home/csasc/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
+
+directory: "" # Defines directory where to save files

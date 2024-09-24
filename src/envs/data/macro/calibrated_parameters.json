@@ -1,0 +1,71 @@
+{
+    "san_francisco": {
+      "demand_ratio": 2,
+      "json_hr": 19,
+      "beta": 0.2,
+      "test_tstep": 3
+    },
+    "washington_dc": {
+      "demand_ratio": 4.2,
+      "json_hr": 19,
+      "beta": 0.5
+    },
+    "chicago": {
+      "demand_ratio": 1.8,
+      "json_hr": 19,
+      "beta": 0.5
+    },
+    "nyc_man_north": {
+      "demand_ratio": 1.8,
+      "json_hr": 19,
+      "beta": 0.5
+    },
+    "nyc_man_middle": {
+      "demand_ratio": 1.8,
+      "json_hr": 19,
+      "beta": 0.5
+    },
+    "nyc_man_south": {
+      "demand_ratio": 1.8,
+      "json_hr": 19,
+      "beta": 0.5
+    },
+    "nyc_brooklyn": {
+      "demand_ratio": 9,
+      "json_hr": 19,
+      "beta": 0.5,
+      "test_tstep": 4
+    },
+    "porto": {
+      "demand_ratio": 4,
+      "json_hr": 8,
+      "beta": 0.1
+    },
+    "rome": {
+      "demand_ratio": 1.8,
+      "json_hr": 8,
+      "beta": 0.1
+    },
+    "shenzhen_baoan": {
+      "demand_ratio": 2.5,
+      "json_hr": 8,
+      "beta": 0.5
+    },
+    "shenzhen_downtown_west": {
+      "demand_ratio": 2.5,
+      "json_hr": 8,
+      "beta": 0.5,
+      "test_tstep": 3
+    },
+    "shenzhen_downtown_east": {
+      "demand_ratio": 3,
+      "json_hr": 8,
+      "beta": 0.5
+    },
+    "shenzhen_north": {
+      "demand_ratio": 3,
+      "json_hr": 8,
+      "beta": 0.5
+    }
+  }
+  

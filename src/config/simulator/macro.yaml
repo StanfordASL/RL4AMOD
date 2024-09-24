@@ -1,0 +1,21 @@
+name: macro
+
+seed: 10  # Random seed (default: 10)
+
+demand_ratio: 0.5  # Ratio of demand (default: 0.5)
+
+json_hr: 7  # Hour of the day for JSON configuration (default: 7)
+
+json_tsetp: 3  # Minutes per timestep (default: 3 min)
+
+beta: 0.5  # Cost of rebalancing (default: 0.5)
+
+city: "nyc_brooklyn"  # Defines city to train on
+
+max_steps: 20  # Number of steps per episode (default: T=20)
+
+time_horizon: 6  # Steps in the future for demand and arriving vehicle forecast (default: 6 min)
+
+cplexpath: "/home/csasc/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
+  
+directory: ""  # Defines directory where to save files
