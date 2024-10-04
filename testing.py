@@ -5,6 +5,7 @@ import json
 import numpy as np
 from hydra import initialize, compose
 from src.algos.registry import get_model
+import os 
 
 def setup_sumo(cfg):
     from src.envs.sim.sumo_env import Scenario, AMoD, GNNParser
@@ -121,10 +122,30 @@ def test(config):
     print('Mean Episode Rebalancing Cost($): ', np.mean(episode_rebalancing_cost))
 
     inflows = np.mean(inflows, axis=0)
-    no_reb_reward = 27.6
-    #no_reb_demand = 1599.6
-    no_reb_demand = 27.6
-    no_reb_cost = 0.0
+    
+    #check if no_control performance is saved
+    path = f'/src/envs/data/{cfg.simulator.name}/{cfg.simulator.city}_no_control_performance.json'
+    #check if path exists
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            no_control_performance = json.load(f)
+        no_reb_reward = no_control_performance['reward']
+        no_reb_demand = no_control_performance['served_demand']
+        no_reb_cost = no_control_performance['rebalancing_cost']
+    else:
+        print('No control performance not found. Calculating (this happens only the first time on a new environment)...')
+        cfg_copy = cfg.copy()
+        cfg_copy.model.name = 'no_rebalancing'
+        model = setup_model(cfg, env, parser, device)
+        no_reb_reward, no_reb_demand, no_reb_cost, _ = model.test(10, env)
+        no_reb_reward = round(np.mean(no_reb_reward)/1000,2)
+        no_reb_demand = round(np.mean(no_reb_demand)/1000,2)
+        no_reb_cost = round(np.mean(no_reb_cost)/1000,2)
+        no_control_performance = {'reward': no_reb_reward, 'served_demand': no_reb_demand, 'rebalancing_cost': no_reb_cost}
+        print(f'No control performance calculated. Saving in {path}...')
+        with open(path, 'w') as f:
+            json.dump(no_control_performance, f)
+
     mean_reward = np.mean(episode_reward)
     mean_served_demand = np.mean(episode_served_demand)
     mean_rebalancing_cost = np.mean(episode_rebalancing_cost)
@@ -142,11 +163,11 @@ def test(config):
     width = 0.15  # the width of the bars
 
     fig, (ax1, ax2) = plt.subplots(nrows=1, ncols=2, figsize=(15, 5))
-
-    #fig, ax = plt.subplots(figsize=(8, 5))
-    rects1 = ax1.bar(x - width/2, rl_means, width, label=cfg.model.name, color="#0072BD", capsize=5)
-    rects2 = ax1.bar(x + width/2, no_control, width, label='No Control', color="#A2142F")
     
+    #fig, ax = plt.subplots(figsize=(8, 5))
+    rects1 = ax1.bar(x - width/2, rl_means, width, label=cfg.model.name, color="#0072BD")
+    rects2 = ax1.bar(x + width/2, no_control, width, label='No Control', color="#A2142F")
+
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax1.set_xlabel('Metrics')
     ax1.set_ylabel('$, x10^3')
@@ -171,54 +192,56 @@ def test(config):
 
     #plt.tight_layout()
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-    #plt.show()
-    
 
-    open_reqest = {0: 0,
-        1: 414.0,
-        2: 0,
-        3: 0,
-        4: 0,
-        5: 49756.49999999998,
-        6: 9948.600000000006,
-        7: 98.99999999999999,
-        8: 198.00000000000003,
-        9: 881.9999999999998,
-        10: 1232.9999999999993,
-        11: 6492.600000000001,
-        12: 23293.80000000004,
-        13: 170.99999999999997}
-    
-    #open_reqest = {k: v / max(open_reqest.values()) for k,v in open_reqest.items()}
+    if cfg.simulator.city != 'nyc_brooklyn': 
+        plt.show()
+    else: 
+        #plots for tutorial
+        open_reqest = {0: 0,
+            1: 414.0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 49756.49999999998,
+            6: 9948.600000000006,
+            7: 98.99999999999999,
+            8: 198.00000000000003,
+            9: 881.9999999999998,
+            10: 1232.9999999999993,
+            11: 6492.600000000001,
+            12: 23293.80000000004,
+            13: 170.99999999999997}
+        
+        #open_reqest = {k: v / max(open_reqest.values()) for k,v in open_reqest.items()}
 
-    #inflows = inflows / max(inflows)
+        #inflows = inflows / max(inflows)
 
-    labels = range(14)
-    x = np.arange(len(labels))  # the label locations
-    width = 0.25  # the width of the bars
+        labels = range(14)
+        x = np.arange(len(labels))  # the label locations
+        width = 0.25  # the width of the bars
 
-    r1 = np.arange(14)
-    r2 = [x + width for x in r1]
+        r1 = np.arange(14)
+        r2 = [x + width for x in r1]
 
-    #fig, ax = plt.subplots(figsize=(8, 5))
-    ax2.bar(r2, inflows, width, label='Rebalancing Flows', color="#0072BD")
-    ax3 = ax2.twinx()  # Create a second y-axis
-    ax3.bar(r1, open_reqest.values(), width, label='Profit', color="#A2142F")
+        #fig, ax = plt.subplots(figsize=(8, 5))
+        ax2.bar(r2, inflows, width, label='Rebalancing Flows', color="#0072BD")
+        ax3 = ax2.twinx()  # Create a second y-axis
+        ax3.bar(r1, open_reqest.values(), width, label='Profit', color="#A2142F")
 
-    # Add labels and title to the second plot
-    ax2.set_xlabel('Regions')
-    ax2.set_ylabel('Flows', color="#0072BD")
-    ax3.set_ylabel('Profit', color="#A2142F")
-    ax2.set_title('Comparison of Incoming Rebalancing Flows vs Profit')
-    ax2.set_xticks(r1)
-    ax2.set_xticklabels(labels)
-    ax2.tick_params(axis='y', labelcolor="#0072BD")
-    ax3.tick_params(axis='y', labelcolor="#A2142F")
-    #ax2.legend()
-    #ax3.legend()
+        # Add labels and title to the second plot
+        ax2.set_xlabel('Regions')
+        ax2.set_ylabel('Flows', color="#0072BD")
+        ax3.set_ylabel('Profit', color="#A2142F")
+        ax2.set_title('Comparison of Incoming Rebalancing Flows vs Profit')
+        ax2.set_xticks(r1)
+        ax2.set_xticklabels(labels)
+        ax2.tick_params(axis='y', labelcolor="#0072BD")
+        ax3.tick_params(axis='y', labelcolor="#A2142F")
+        #ax2.legend()
+        #ax3.legend()
 
-    plt.tight_layout()  
-    plt.show()
+        plt.tight_layout()  
+        plt.show()
 
 @hydra.main(version_base=None, config_path="src/config/", config_name="config")
 def main(cfg: DictConfig):

@@ -16,6 +16,6 @@ max_steps: 20  # Number of steps per episode (default: T=20)
 
 time_horizon: 6  # Steps in the future for demand and arriving vehicle forecast (default: 6 min)
 
-cplexpath: "/home/csasc/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
+cplexpath: "/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
   
 directory: ""  # Defines directory where to save files

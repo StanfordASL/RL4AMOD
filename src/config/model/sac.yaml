@@ -2,7 +2,7 @@ name: sac
 
 agent_name: ${now:%Y%m%d}_sac_gnn  # Agent name for training or evaluation (default: today's date + '_sac_gnn')
 
-cplexpath: "/home/csasc/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
+cplexpath: "/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
   
 directory: "saved_files"  # Defines directory where to save files
 
