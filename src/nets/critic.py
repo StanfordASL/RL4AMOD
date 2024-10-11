@@ -58,7 +58,7 @@ class GNNCriticLSTM(nn.Module):
 
 class GNNValue(nn.Module):
     """
-    Critic parametrizing the value function estimator V(s_t).
+    Critic parametrizing the value function estimator V(s_t). For one-step data (on-policy).
     """
     def __init__(self, in_channels, hidden_dim=32):
         super().__init__()
@@ -75,4 +75,28 @@ class GNNValue(nn.Module):
         x = F.relu(self.lin1(x))
         x = F.relu(self.lin2(x))
         x = self.lin3(x)
+        return x
+    
+class GNNVF(nn.Module):
+    """
+    Critic parametrizing the value function estimator V(s_t). For batched data (off-policy).
+    """
+
+    def __init__(self, in_channels, hidden_size=64, act_dim=16):
+        super().__init__()
+        self.act_dim = act_dim
+        self.in_channels = in_channels
+        self.conv1 = GCNConv(in_channels, in_channels)
+        self.lin1 = nn.Linear(in_channels, hidden_size)
+        self.lin2 = nn.Linear(hidden_size, hidden_size)
+        self.lin3 = nn.Linear(hidden_size, 1)
+
+    def forward(self, state, edge_index):
+        out = F.relu(self.conv1(state, edge_index))
+        x = out + state
+        x = x.reshape(-1, self.act_dim, self.in_channels)
+        x = torch.sum(x, dim=1)
+        x = F.relu(self.lin1(x))
+        x = F.relu(self.lin2(x))
+        x = self.lin3(x).squeeze(-1)
         return x

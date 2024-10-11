@@ -1,6 +1,6 @@
-name: cql
+name: iql
 
-agent_name: ${now:%Y%m%d}_cql_gnn  # Agent name for training or evaluation (default: today's date + '_sac_gnn')
+agent_name: ${now:%Y%m%d}_sac_gnn  # Agent name for training or evaluation (default: today's date + '_sac_gnn')
 
 cplexpath: "/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
   
@@ -16,32 +16,24 @@ p_lr: 1e-3  # Define policy learning rate
 
 q_lr: 1e-3  # Defines q-value learning rate
 
-alpha: 0.3  # Defines entropy coefficient
-
-auto_entropy: false  # Use automatic entropy tuning
-
 hidden_size: 256  # Defines hidden units in the MLP layers
 
 clip: 500  # Clip value for gradient clipping (default: 500)
 
-checkpoint_path: "CQL"  # Path where to save model checkpoints
+checkpoint_path: "IQL"  # Path where to save model checkpoints
   
 rew_scale: 0.01  # Defines reward scale
-
-use_LSTM: false  # Use LSTM in the model
 
 input_size: 13 # Number of node features
 
 test_episodes: 10 # Number of episodes to test agent
 
-min_q_weight: 1 #conservative weight 
+quantile: 0.7 #quantile value for quantile regression
 
-determinisitc_backup: True #use q-value deterministic backup
+temperature: 1.0 #temperature value for advantage weighted regression
 
 data_path: "dataset" # Path to the data directory
 
 samples_buffer: 60000 # Number of samples in the replay buffer
 
-num_random: 10 
-
-temp: 1.0 
+clip_score: 100 

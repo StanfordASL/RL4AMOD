@@ -17,7 +17,7 @@ class GNNActor(nn.Module):
         self.lin2 = nn.Linear(hidden_size, hidden_size)
         self.lin3 = nn.Linear(hidden_size, 1)
 
-    def forward(self, state, edge_index, deterministic=False):
+    def forward(self, state, edge_index, deterministic=False, return_dist=False):
         out = F.relu(self.conv1(state, edge_index))
         x = out + state
         x = x.reshape(-1, self.act_dim, self.in_channels)
@@ -25,6 +25,8 @@ class GNNActor(nn.Module):
         x = F.leaky_relu(self.lin2(x))
         x = F.softplus(self.lin3(x))
         concentration = x.squeeze(-1)
+        if return_dist:
+            return Dirichlet(concentration + 1e-20)
         if deterministic:
             action = (concentration) / (concentration.sum() + 1e-20)
             log_prob = None

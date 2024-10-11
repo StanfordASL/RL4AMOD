@@ -55,6 +55,12 @@ def setup_model(cfg, env, parser, device):
     elif model_name == "a2c":
         from src.algos.a2c import A2C
         return A2C(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+    elif model_name == "iql":
+        from src.algos.iql import IQL
+        return IQL(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+    elif model_name == "bc":
+        from src.algos.bc import BC
+        return BC(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
     else:
         raise ValueError(f"Unknown model or baseline: {model_name}")
 
