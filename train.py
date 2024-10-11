@@ -4,6 +4,7 @@ import os
 import torch
 import json
 from hydra import initialize, compose
+
 def setup_sumo(cfg):
     from src.envs.sim.sumo_env import Scenario, AMoD, GNNParser
     
@@ -48,7 +49,7 @@ def setup_macro(cfg):
 def setup_model(cfg, env, parser, device):
     model_name = cfg.model.name
     cfg = cfg.model
-    if model_name == "sac":
+    if model_name == "sac" or model_name =="cql":
         from src.algos.sac import SAC
         return SAC(env=env, input_size=cfg.input_size, cfg=cfg, parser=parser).to(device)
     elif model_name == "a2c":
@@ -56,6 +57,27 @@ def setup_model(cfg, env, parser, device):
         return A2C(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
     else:
         raise ValueError(f"Unknown model or baseline: {model_name}")
+
+def setup_dataset(cfg, device):
+    from src.algos.sac import ReplayData
+    with open(f"src/envs/data/macro/scenario_{cfg.simulator.city}.json", "r") as file:
+        data = json.load(file)
+
+    edge_index = torch.vstack(
+        (
+            torch.tensor([edge["i"] for edge in data["topology_graph"]]).view(1, -1),
+            torch.tensor([edge["j"] for edge in data["topology_graph"]]).view(1, -1),
+        )
+    ).long()
+    
+    Dataset = ReplayData(device=device)
+    Dataset.create_dataset(
+        edge_index=edge_index,
+        memory_path=cfg.model.data_path,
+        rew_scale=cfg.model.rew_scale,
+        size=cfg.model.samples_buffer,
+    )
+    return Dataset
 
 def train(config): 
     """
@@ -93,8 +115,12 @@ def main(cfg: DictConfig):
     device = torch.device("cuda" if use_cuda else "cpu")
 
     model = setup_model(cfg, env, parser, device)
-
-    model.learn(cfg)
+    
+    if cfg.model.data_path is not None: #for offline training
+        Dataset = setup_dataset(cfg, device)
+        model.learn(cfg, Dataset)
+    else:
+        model.learn(cfg)
 
 if __name__ == "__main__":
     main()

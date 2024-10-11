@@ -33,3 +33,6 @@ use_LSTM: false  # Use LSTM in the model
 input_size: 13 # Number of node features
 
 test_episodes: 10 # Number of episodes to test agent
+
+determinisitc_backup: False #use q-value deterministic backup
+
