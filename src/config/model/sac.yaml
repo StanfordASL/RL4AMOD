@@ -36,3 +36,6 @@ test_episodes: 10 # Number of episodes to test agent
 
 determinisitc_backup: False #use q-value deterministic backup
 
+pretrained_path: null 
+
+only_q_steps: 0 

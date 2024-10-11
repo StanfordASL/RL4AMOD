@@ -105,6 +105,17 @@ def train(config):
     model = setup_model(cfg, env, parser, device)
     model.learn(cfg)
 
+def load_actor_weights(model, path):
+    full_model_state = torch.load(f"ckpt/{path}.pth")
+
+    actor_encoder_state = {
+        k.replace("actor.", ""): v
+        for k, v in full_model_state["model"].items()
+        if "actor" in k
+    }
+    model.actor.load_state_dict(actor_encoder_state)
+    return model
+
 @hydra.main(version_base=None, config_path="src/config/", config_name="config")
 def main(cfg: DictConfig):
     # Import simulator module based on the configuration
@@ -121,8 +132,12 @@ def main(cfg: DictConfig):
     device = torch.device("cuda" if use_cuda else "cpu")
 
     model = setup_model(cfg, env, parser, device)
-    
-    if cfg.model.data_path is not None: #for offline training
+
+    if hasattr(cfg.model, "pretrained_path"):
+        if cfg.model.pretrained_path is not None:
+            model = load_actor_weights(model, cfg.model.pretrained_path)
+
+    if hasattr(cfg.model, "data_path"):
         Dataset = setup_dataset(cfg, device)
         model.learn(cfg, Dataset)
     else:

@@ -303,7 +303,7 @@ class SAC(nn.Module):
         loss_pi = (self.alpha * logp_a - q_a).mean()
         return loss_pi
 
-    def update(self, data, conservative=False):
+    def update(self, data, conservative=False, only_q=False):
         loss_q1, loss_q2 = self.compute_loss_q(data, conservative)
 
         self.optimizers["c1_optimizer"].zero_grad()
@@ -329,26 +329,27 @@ class SAC(nn.Module):
             ):
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
+        
+        if not only_q:
+            # Freeze Q-networks so you don't waste computational effort
+            # computing gradients for them during the policy learning step.
+            for p in self.critic1.parameters():
+                p.requires_grad = False
+            for p in self.critic2.parameters():
+                p.requires_grad = False
 
-        # Freeze Q-networks so you don't waste computational effort
-        # computing gradients for them during the policy learning step.
-        for p in self.critic1.parameters():
-            p.requires_grad = False
-        for p in self.critic2.parameters():
-            p.requires_grad = False
+            # one gradient descent step for policy network
+            self.optimizers["a_optimizer"].zero_grad()
+            loss_pi = self.compute_loss_pi(data)
+            loss_pi.backward(retain_graph=False)
+            nn.utils.clip_grad_norm_(self.actor.parameters(), 10)
+            self.optimizers["a_optimizer"].step()
 
-        # one gradient descent step for policy network
-        self.optimizers["a_optimizer"].zero_grad()
-        loss_pi = self.compute_loss_pi(data)
-        loss_pi.backward(retain_graph=False)
-        nn.utils.clip_grad_norm_(self.actor.parameters(), 10)
-        self.optimizers["a_optimizer"].step()
-
-        # Unfreeze Q-networks
-        for p in self.critic1.parameters():
-            p.requires_grad = True
-        for p in self.critic2.parameters():
-            p.requires_grad = True
+            # Unfreeze Q-networks
+            for p in self.critic1.parameters():
+                p.requires_grad = True
+            for p in self.critic2.parameters():
+                p.requires_grad = True
 
     def _get_action_and_values(self, data, num_actions, batch_size, action_dim):
       
@@ -445,7 +446,7 @@ class SAC(nn.Module):
             epochs = trange(train_episodes*T)  #  # epoch iterator
             best_reward = -np.inf  # set best reward
             self.train()  # set model in train mode
-            
+
             for step in epochs:
                 if step % 1000 == 0:
                     self.eval()
@@ -519,7 +520,10 @@ class SAC(nn.Module):
                     obs = new_obs
                     if i_episode > 10:
                         batch = self.replay_buffer.sample_batch(cfg.model.batch_size)
-                        self.update(data=batch)
+                        if step < cfg.only_q_steps:
+                            self.update(data=batch, only_q=True)
+                        else:
+                            self.update(data=batch)
                     if sim =='sumo' and done:
                         traci.close()
                 epochs.set_description(
