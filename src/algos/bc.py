@@ -193,7 +193,7 @@ class BC(nn.Module):
         sim = cfg.simulator.name
         if sim == "sumo": 
             #traci.close(wait=False)
-            scenario_path = '/src/envs/data/LuSTScenario/'
+            scenario_path = '/src/envs/data/lux/'
             sumocfg_file = 'dua_meso.static.sumocfg'
             net_file = os.path.join(scenario_path, 'input/lust_meso.net.xml')
             os.makedirs('saved_files/sumo_output/scenario_lux/', exist_ok=True)

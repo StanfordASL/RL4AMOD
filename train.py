@@ -7,21 +7,24 @@ from hydra import initialize, compose
 
 def setup_sumo(cfg):
     from src.envs.sim.sumo_env import Scenario, AMoD, GNNParser
-    
-    cfg = cfg.simulator
     cfg.simulator.cplexpath = cfg.model.cplexpath
+    if not cfg.simulator.directory:
+        cfg.simulator.directory = f"{cfg.model.name}/{cfg.simulator.city}"
+    cfg = cfg.simulator
+    scenario_path = 'src/envs/data'
+    cfg.sumocfg_file = f'{scenario_path}/{cfg.city}/{cfg.sumocfg_file}'
+    cfg.net_file = f'{scenario_path}/{cfg.city}/{cfg.net_file}'
     demand_file = f'src/envs/data/scenario_lux{cfg.num_regions}.json'
     aggregated_demand = not cfg.random_od
-    scenario_path = 'src/envs/data/LuSTScenario/'
-    net_file = os.path.join(scenario_path, 'input/lust_meso.net.xml')
 
-    scenario = Scenario(num_cluster=cfg.num_regions, json_file=demand_file, aggregated_demand=aggregated_demand,
-                sumo_net_file=net_file, acc_init=cfg.acc_init, sd=cfg.seed, demand_ratio=cfg.demand_ratio,
-                time_start=cfg.time_start, time_horizon=cfg.time_horizon, duration=cfg.duration,
-                tstep=cfg.matching_tstep, max_waiting_time=cfg.max_waiting_time)
-    env = AMoD(scenario, beta=cfg.beta)
+    scenario = Scenario(
+        num_cluster=cfg.num_regions, json_file=demand_file, aggregated_demand=aggregated_demand,
+        sumo_net_file=cfg.net_file, acc_init=cfg.acc_init, sd=cfg.seed, demand_ratio=cfg.demand_ratio,
+        time_start=cfg.time_start, time_horizon=cfg.time_horizon, duration=cfg.duration,
+        tstep=cfg.matching_tstep, max_waiting_time=cfg.max_waiting_time
+    )
+    env = AMoD(scenario, cfg=cfg, beta=cfg.beta)
     parser = GNNParser(env, T=cfg.time_horizon, json_file=demand_file)
-
     return env, parser
 
 def setup_macro(cfg):
@@ -64,17 +67,30 @@ def setup_model(cfg, env, parser, device):
     else:
         raise ValueError(f"Unknown model or baseline: {model_name}")
 
-def setup_dataset(cfg, device):
+def setup_dataset(cfg, env, device):
     from src.algos.sac import ReplayData
-    with open(f"src/envs/data/macro/scenario_{cfg.simulator.city}.json", "r") as file:
-        data = json.load(file)
 
-    edge_index = torch.vstack(
-        (
-            torch.tensor([edge["i"] for edge in data["topology_graph"]]).view(1, -1),
-            torch.tensor([edge["j"] for edge in data["topology_graph"]]).view(1, -1),
-        )
-    ).long()
+    if cfg.simulator.name == "sumo":
+        origin = []
+        destination = []
+        for o in range(env.scenario.adjacency_matrix.shape[0]):
+            for d in range(env.scenario.adjacency_matrix.shape[1]):
+                if env.scenario.adjacency_matrix[o, d] == 1:
+                    origin.append(o)
+                    destination.append(d)
+
+        edge_index = torch.cat([torch.tensor([origin]), torch.tensor([destination])])
+
+    else: 
+        with open(f"src/envs/data/macro/scenario_{cfg.simulator.city}.json", "r") as file:
+            data = json.load(file)
+
+        edge_index = torch.vstack(
+            (
+                torch.tensor([edge["i"] for edge in data["topology_graph"]]).view(1, -1),
+                torch.tensor([edge["j"] for edge in data["topology_graph"]]).view(1, -1),
+            )
+        ).long()
     
     Dataset = ReplayData(device=device)
     Dataset.create_dataset(
@@ -83,6 +99,7 @@ def setup_dataset(cfg, device):
         rew_scale=cfg.model.rew_scale,
         size=cfg.model.samples_buffer,
     )
+
     return Dataset
 
 def train(config): 
@@ -138,7 +155,7 @@ def main(cfg: DictConfig):
             model = load_actor_weights(model, cfg.model.pretrained_path)
 
     if hasattr(cfg.model, "data_path"):
-        Dataset = setup_dataset(cfg, device)
+        Dataset = setup_dataset(cfg, env, device)
         model.learn(cfg, Dataset)
     else:
         model.learn(cfg)

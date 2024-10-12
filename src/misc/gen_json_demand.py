@@ -208,7 +208,7 @@ class Scenario:
         """
         return True if random.random() < prob else False
 
-    def set_root(self, xml_file='data/LuSTScenario/input/routes/local.0.rou.xml', demand='True'):
+    def set_root(self, xml_file='data/lux/input/routes/local.0.rou.xml', demand='True'):
         """
         Function to split the initial xml file in demand and traffic xml files
         """
@@ -332,27 +332,27 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     scenario = Scenario(
-        net=sumolib.net.readNet('data/LuSTScenario/input/lust_meso.net.xml'),
+        net=sumolib.net.readNet('data/lux/input/lust_meso.net.xml'),
         nregions=args.num_regions, time_aggr=args.time_aggregation
     )
 
-    xml_exist = os.path.exists('data/LuSTScenario/input/routes/local.rou.xml')
+    xml_exist = os.path.exists('data/lux/input/routes/local.rou.xml')
     print(f'demand.rou.xml and local/rou.xml e xist: {xml_exist}')
     if xml_exist:
         xml_files = [
-            'data/LuSTScenario/input/routes/local.rou.xml',
-            'data/LuSTScenario/input/routes/demand.rou.xml'
+            'data/lux/input/routes/local.rou.xml',
+            'data/lux/input/routes/demand.rou.xml'
         ]
     else:
         xml_files = [
-            'data/LuSTScenario/input/routes/local.0.rou.xml',
-            'data/LuSTScenario/input/routes/local.1.rou.xml',
-            'data/LuSTScenario/input/routes/local.2.rou.xml',
+            'data/lux/input/routes/local.0.rou.xml',
+            'data/lux/input/routes/local.1.rou.xml',
+            'data/lux/input/routes/local.2.rou.xml',
         ]
     for xml in xml_files:
-        if xml == 'data/LuSTScenario/input/routes/local.rou.xml':
+        if xml == 'data/lux/input/routes/local.rou.xml':
             scenario.set_root(xml, 'False')
-        elif xml == 'data/LuSTScenario/input/routes/demand.rou.xml':
+        elif xml == 'data/lux/input/routes/demand.rou.xml':
             scenario.set_root(xml, 'True')
         else:
             scenario.set_root(xml, 'Random')
@@ -369,11 +369,11 @@ if __name__ == '__main__':
 
     if not xml_exist:
         tree_demand = ET.ElementTree(scenario.root_demand)
-        tree_demand.write(f'data/LuSTScenario/input/routes/demand.rou.xml', pretty_print=True)
+        tree_demand.write(f'data/lux/input/routes/demand.rou.xml', pretty_print=True)
         tree_trips = ET.ElementTree(scenario.root_trips)
-        tree_trips.write(f'data/LuSTScenario/input/routes/trips.rou.xml', pretty_print=True)
+        tree_trips.write(f'data/lux/input/routes/trips.rou.xml', pretty_print=True)
         tree_traffic = ET.ElementTree(scenario.root_traffic)
-        tree_traffic.write(f'data/LuSTScenario/input/routes/local.rou.xml', pretty_print=True)
+        tree_traffic.write(f'data/lux/input/routes/local.rou.xml', pretty_print=True)
     data = scenario.set_json()
     with open(f'data/scenario_lux{args.num_regions}_taggr{args.time_aggregation}.json', 'w') as json_file:
         json.dump(data, json_file, indent=4)

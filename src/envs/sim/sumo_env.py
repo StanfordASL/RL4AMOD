@@ -150,6 +150,7 @@ class AMoD:
         self.info['rebalancing_cost'] = 0
         # Matching step
         demandAttr = self.get_demand_attr()
+
         if paxAction is None:  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
             # Taxis information
             taxi_ids = traci.vehicle.getTaxiFleet(0)
@@ -539,7 +540,7 @@ class AMoD:
                 self.passengers[n][self.time] = 0
 
         return demandAttr
-
+    
     def update_routes(self, time):
         """
         Method to update the travel time in the network
@@ -631,7 +632,7 @@ class Scenario:
         # Aggregated net creation
         self.N = num_cluster
         if sumo_net_file is None:
-            sumo_net_file = 'data/LuSTScenario/lust.net.xml'
+            sumo_net_file = 'data/lux/lust.net.xml'
 
         self.is_meso = 'meso' in sumo_net_file
         self.sumo_net = sumolib.net.readNet(sumo_net_file)
@@ -784,7 +785,7 @@ class Scenario:
                     route.set('edges', " ".join(edges))
                     route.set('id', route_id)
         tree = ET.ElementTree(routes)
-        tree.write("data/LuSTScenario/input/routes/taxi_initialization.rou.xml", xml_declaration=True, pretty_print=True)
+        tree.write("data/lux/input/routes/taxi_initialization.rou.xml", xml_declaration=True, pretty_print=True)
 
     def get_taxi_routes(self):
         """
@@ -926,7 +927,7 @@ class Scenario:
                         price[i, j][t] = min(3, np.random.exponential(2) + 1) * self.demand_time[i, j][t]
                     trip_attr.append((i, j, t, demand[i, j][t], price[i, j][t]))
 
-        print(f'Total demand: {sum([demand[i, j][t] for i, j in demand for t in range(0, self.duration, self.tstep)])}')
+        #print(f'Total demand: {sum([demand[i, j][t] for i, j in demand for t in range(0, self.duration, self.tstep)])}')
         return trip_attr
 
     def get_price(self, t, trip):

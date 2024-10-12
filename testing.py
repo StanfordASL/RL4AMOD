@@ -53,18 +53,22 @@ def setup_macro(cfg):
 def setup_model(cfg, env, parser, device):
     model_name = cfg.model.name
 
-    if model_name == "sac":
+    if model_name == "sac" or model_name =="cql":
         from src.algos.sac import SAC
         model= SAC(env=env, input_size=cfg.model.input_size, cfg=cfg.model, parser=parser).to(device)
-        # model.load_checkpoint(path=f"ckpt/{cfg.model.agent_name}.pth")
         model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}_best.pth")
         return model
-    
     elif model_name == "a2c":
         from src.algos.a2c import A2C
         model= A2C(env=env, input_size=cfg.model.input_size, parser=parser).to(device)
         model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}_best.pth")
         return model
+    elif model_name == "iql":
+        from src.algos.iql import IQL
+        return IQL(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+    elif model_name == "bc":
+        from src.algos.bc import BC
+        return BC(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
     
     else:
         model_class = get_model(model_name)
@@ -73,25 +77,10 @@ def setup_model(cfg, env, parser, device):
             "cplexpath": cfg.simulator.cplexpath,
             "directory": cfg.simulator.directory,
             "T": cfg.simulator.time_horizon,
-            "policy_name": cfg.model.agent_name
+            "policy_name": cfg.model.name
         }
         
         return model_class(**model_kwargs)
-
-def setup_net(cfg):
-    if cfg.model.use_LSTM:
-        from src.nets.actor import GNNActorLSTM as GNNActor
-        from src.nets.critic import GNNCriticLSTM as GNNCritic
-    else:
-        from src.nets.actor import GNNActor
-        from src.nets.critic import GNNCritic
-
-        models = {
-        "actor": GNNActor,
-        "critic": GNNCritic,
-        }
-    return models
-
 
 def test(config):
     '''

@@ -8,7 +8,7 @@ directory: "saved_files"  # Defines directory where to save files
 
 max_episodes: 10000  # Number of episodes to train agent (default: 16k)
 
-no_cuda: true  # Disables CUDA training
+no_cuda: false  # Disables CUDA training
 
 batch_size: 100  # Defines batch size
 

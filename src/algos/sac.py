@@ -52,7 +52,7 @@ class ReplayData:
         self.data_list.append(PairData(data1.edge_index, data1.x, torch.as_tensor(
             reward), torch.as_tensor(action), data2.edge_index, data2.x))
         self.rewards.append(reward)
-
+    
     def create_dataset(self, edge_index, memory_path, rew_scale, size=60000):
         w = open(f"data/{memory_path}.pkl", "rb")
         data = pickle.load(w)
@@ -423,7 +423,7 @@ class SAC(nn.Module):
         sim = cfg.simulator.name
         if sim == "sumo": 
             #traci.close(wait=False)
-            scenario_path = '/src/envs/data/LuSTScenario/'
+            scenario_path = 'src/envs/data/lux/'
             sumocfg_file = 'dua_meso.static.sumocfg'
             net_file = os.path.join(scenario_path, 'input/lust_meso.net.xml')
             os.makedirs('saved_files/sumo_output/scenario_lux/', exist_ok=True)
@@ -438,6 +438,7 @@ class SAC(nn.Module):
             "-b", str(cfg.simulator.time_start * 60 * 60), "--seed", "10",
             "-W", 'true', "-v", 'false',
             ]
+            print(os.path.join(scenario_path, sumocfg_file))
             assert os.path.exists(os.path.join(scenario_path, sumocfg_file)), "SUMO configuration file not found!"
 
         if Dataset is not None:
