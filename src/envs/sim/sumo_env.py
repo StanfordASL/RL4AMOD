@@ -60,6 +60,7 @@ class AMoD:
         self.acc = defaultdict(dict)  # number of vehicles within each region, key: i - region, t - time
         self.dacc = defaultdict(dict)  # number of vehicles arriving at each region, key: i - region, t - time
         self.passengers = defaultdict(dict)     # number of passengers per region
+        self.unserved_demand = defaultdict(dict)  # uncollected revenue per region
         self.demand_res = defaultdict(dict)  # reservations from sumo assigned to each (origin, destination) pair
         self.rebFlow = defaultdict(dict)  # number of rebalancing vehicles, key: (i,j) - (origin, destination), t - time
         self.paxFlow = defaultdict(dict)  # number of vehicles with passengers, key: (i,j) - (origin, destination), t - time
@@ -82,6 +83,7 @@ class AMoD:
             self.dacc[n] = defaultdict(float)
             self.waiting_time[n] = defaultdict(float)
             self.passengers[n] = defaultdict(float)
+            self.unserved_demand[n] = defaultdict(float)
         self.beta = beta * scenario.tstep
         self.servedDemand = defaultdict(dict)
         for i, j in self.demand:
@@ -147,7 +149,6 @@ class AMoD:
         self.info["operating_cost"] = 0  # initialize operating cost
         self.info['revenue'] = 0
         self.info['profit'] = 0
-        self.info['rebalancing_cost'] = 0
         # Matching step
         demandAttr = self.get_demand_attr()
 
@@ -187,12 +188,13 @@ class AMoD:
                     self.reservations_assigned.append([reservation_id, persons, taxi_id])
                     self.paxFlow[i, j][arrival_time] += 1
                     self.dacc[j][arrival_time] += 1
+                    self.unserved_demand[i][t] -= self.price[i, j][t]
                     self.info["operating_cost"] += demand_time * self.beta
                     self.reward += (self.price[i, j][t] - demand_time * self.beta)
                 taxi_match += 1
         self.info['profit'] += (self.info['revenue']-self.info["operating_cost"])
 
-        self.obs = (self.acc, self.time, self.dacc, self.demand)  # for acc, the time index would be t+1, but for demand, the time index would be t
+        self.obs = (self.acc, self.time, self.dacc, self.demand, self.unserved_demand)  # for acc, the time index would be t+1, but for demand, the time index would be t
         done = False  # if passenger matching is executed first
         return self.obs, max(0, self.reward), done, self.info
 
@@ -257,6 +259,8 @@ class AMoD:
         t = self.time
         self.reward = 0  # reward is calculated from before this to the next rebalancing, we may also have two rewards, one for pax matching and one for rebalancing
         self.info['rebalanced_vehicles'] = 0
+        self.info['rebalancing_cost'] = 0
+        self.info['operating_cost'] = 0
         self.rebAction = rebAction
         # rebalancing
         reb_assign = list()
@@ -291,7 +295,7 @@ class AMoD:
                 res_id = reservation_ids[reservation_p.index(person_id)]
                 traci.vehicle.dispatchTaxi(taxi_id, [res_id])
 
-        self.obs = (self.acc, self.time, self.dacc, self.demand)  # use self.time to index the next time step
+        self.obs = (self.acc, self.time, self.dacc, self.demand, self.unserved_demand)  # use self.time to index the next time step
         # Travel time update from sumo
         self.update_routes(time=t+tstep)
         for i, j in self.G.edges:
@@ -413,7 +417,7 @@ class AMoD:
         self.scenario.set_taxi_distribution()
 
         # TODO: define states here
-        self.obs = (self.acc, self.time, self.dacc, self.demand)
+        self.obs = (self.acc, self.time, self.dacc, self.demand, self.unserved_demand)
         self.reward = 0
         # 1st pax step
         if self.scenario.is_meso:
@@ -480,7 +484,7 @@ class AMoD:
         self.scenario.set_taxi_distribution()
 
         # TODO: define states here
-        self.obs = (self.acc, self.time, self.dacc, self.demand)
+        self.obs = (self.acc, self.time, self.dacc, self.demand, self.unserved_demand)
         self.reward = 0
         # 1st pax step
         if self.scenario.is_meso:
@@ -520,6 +524,7 @@ class AMoD:
                 continue
             self.passengers[o][self.time] += 1
             self.waiting_time[o][self.time] += waiting_time / 60
+            self.unserved_demand[o][self.time] += price
             # Condition to increase the flow if the same trip demand is present in the reservations list
             if not (o, d) in trips:
                 trips.append((o, d))
@@ -538,9 +543,10 @@ class AMoD:
                 self.waiting_time[n][self.time] /= self.passengers[n][self.time]
             else:
                 self.passengers[n][self.time] = 0
+                self.unserved_demand[n][self.time] = 0
 
         return demandAttr
-    
+
     def update_routes(self, time):
         """
         Method to update the travel time in the network
@@ -632,7 +638,7 @@ class Scenario:
         # Aggregated net creation
         self.N = num_cluster
         if sumo_net_file is None:
-            sumo_net_file = 'data/lux/lust.net.xml'
+            sumo_net_file = 'src/envs/data/lux/lust.net.xml'
 
         self.is_meso = 'meso' in sumo_net_file
         self.sumo_net = sumolib.net.readNet(sumo_net_file)
@@ -785,7 +791,7 @@ class Scenario:
                     route.set('edges', " ".join(edges))
                     route.set('id', route_id)
         tree = ET.ElementTree(routes)
-        tree.write("data/lux/input/routes/taxi_initialization.rou.xml", xml_declaration=True, pretty_print=True)
+        tree.write("src/envs/data/lux/input/routes/taxi_initialization.rou.xml", xml_declaration=True, pretty_print=True)
 
     def get_taxi_routes(self):
         """
@@ -995,8 +1001,9 @@ class GNNParser:
             torch.tensor([[(obs[0][n][self.env.time+1] + self.env.dacc[n][t])*self.s_acc for n in self.env.region] \
                           for t in range(self.env.time+1, self.env.time+self.T+1)]).view(1, self.T, self.env.nregion).float(),
             torch.tensor([[sum([(self.env.scenario.demand_input[i,j][t])*(self.env.price[i,j][t])*self.s_dem \
-                          for j in self.env.region]) for i in self.env.region] for t in range(self.env.time+1, self.env.time+self.T+1)]).view(1, self.T, self.env.nregion).float()),
-              dim=1).squeeze(0).view(1+self.T+self.T, self.env.nregion).T
+                          for j in self.env.region]) for i in self.env.region] for t in range(self.env.time+1, self.env.time+self.T+1)]).view(1, self.T, self.env.nregion).float(),
+            torch.tensor([obs[4][n][self.env.time] * self.s_dem for n in self.env.region]).view(1, 1, self.env.nregion).float()),
+              dim=1).squeeze(0).view(1+self.T+self.T+1, self.env.nregion).T
 
         ###################
         # ADDED
