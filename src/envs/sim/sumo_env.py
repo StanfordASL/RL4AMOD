@@ -544,7 +544,7 @@ class AMoD:
             else:
                 self.passengers[n][self.time] = 0
                 self.unserved_demand[n][self.time] = 0
-
+        
         return demandAttr
 
     def update_routes(self, time):

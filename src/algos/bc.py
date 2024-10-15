@@ -70,7 +70,7 @@ class BC(nn.Module):
             data.edge_index_s,
             data.action.reshape(-1, self.env.nregion),
         )
-
+         
         m = self.actor(state_batch, edge_index, return_dist=True)
 
         policy_logpp = m.log_prob(action_batch)
@@ -137,7 +137,7 @@ class BC(nn.Module):
             if sim =='sumo':
                 traci.start(sumo_cmd)
             obs, rew = env.reset()  # initialize environment
-            obs = self.parser.parse_obs(obs)
+            obs = self.parser.parse_obs(obs).to(self.device)
             eps_reward += rew
             eps_served_demand += rew
             actions = []
@@ -162,8 +162,7 @@ class BC(nn.Module):
                     i,j = env.edges[k]
                     inflow[j] += reb_action[k]
 
-                if not done:
-                    obs = self.parser.parse_obs(new_obs)
+                obs = self.parser.parse_obs(new_obs).to(self.device)
                 
                 eps_reward += rew
                 eps_served_demand += info["profit"]

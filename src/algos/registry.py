@@ -7,6 +7,7 @@ from src.algos.no_reb import NoRebalanceBaseline
 from src.algos.random import RandomBaseline
 from src.algos.MPC import MPC
 from src.algos.dtv import DTV
+from src.algos.inf import INF
 
 MODEL_REGISTRY = {
     "sac": SAC,
@@ -17,6 +18,7 @@ MODEL_REGISTRY = {
     "random": RandomBaseline,
     "mpc": MPC, 
     "dtv": DTV, 
+    "inf": INF,
 }
 
 def get_model(model_name):

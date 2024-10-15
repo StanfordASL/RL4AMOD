@@ -1,5 +1,4 @@
 from src.algos.base import BaseAlgorithm
-
 class NoRebalanceBaseline(BaseAlgorithm):
     def __init__(self, **kwargs):
 
@@ -9,5 +8,6 @@ class NoRebalanceBaseline(BaseAlgorithm):
         """
         Implements the No Rebalancing (no_reb) strategy.
         """
+        t = env.time
         reb_action = [0] * len(env.edges)
         return reb_action

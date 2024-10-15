@@ -80,7 +80,6 @@ class AMoD:
                         if t in self.demand[i,j] and self.demand[i,j][t]>1e-3]
             accTuple = [(n,self.acc[n][t+1]) for n in self.acc]
 
-            #print(accTuple)
             modPath = os.getcwd().replace('\\','/')+'/src/cplex_mod/'
             matchingPath = os.getcwd().replace('\\','/')+'/saved_files/cplex_logs/matching/'+PATH + '/'
             if not os.path.exists(matchingPath):
@@ -92,8 +91,7 @@ class AMoD:
                 file.write('demandAttr='+mat2str(demandAttr)+';\r\n')
                 file.write('accInitTuple='+mat2str(accTuple)+';\r\n')
             modfile = modPath+'matching.mod'
-            #if CPLEXPATH is None:
-            #    CPLEXPATH = "C:/Program Files/ibm/ILOG/CPLEX_Studio1210/opl/bin/x64_win64/"
+
             my_env = os.environ.copy()
             if platform == 'mac':
                 my_env["DYLD_LIBRARY_PATH"] = CPLEXPATH
@@ -116,8 +114,6 @@ class AMoD:
                             flow[int(i),int(j)] = float(f)
                 
             paxAction = [flow[i,j] if (i,j) in flow else 0 for i,j in self.edges]
-            #print(paxAction)
-            #print(sum(paxAction))
             return paxAction
 
     def matching_pulp(self):
@@ -133,8 +129,6 @@ class AMoD:
         demand_edges = [(i, j) for i,j in self.demand if t in self.demand[i,j] and self.demand[i,j][t]>1e-3]
 
         region = [n for n in acc_init]
-
-        #print(acc_init)
     
         # Create a new PuLP model
         model = LpProblem("DemandFlowOptimization", LpMaximize)
@@ -158,26 +152,17 @@ class AMoD:
 
         # Solve the problem
         status = model.solve(pulp.PULP_CBC_CMD(msg=False, options=["primalTol=1e-10", "dualTol=1e-10", "mipGap=1e-10"]))
-        #print(f"PuLP Objective: {value(model.objective)}")
         # Output the results
         if LpStatus[status] == "Optimal":
             flow = {(i, j): value(flow[(i, j)]) for (i, j) in demand_edges}
             
             paxAction = [flow[i,j] if (i,j) in flow else 0 for i,j in self.edges]
 
-            #flow_result = {(i, j): value(flow[(i, j)]) for (i, j) in demand_edges}
-
-            # Map flow values to paxAction array based on the edges
-            #paxAction = [flow_result[(i, j)] for (i, j) in self.edges]
-            #print('pulp')
-            #print(sum([flow[(i, j)] * price[(i, j)] for (i, j) in demand_edges]))
-            #print(paxAction)
-            #print(sum(paxAction))
             return paxAction
         else:
             print(f"Optimization failed with status: {LpStatus[status]}")
             return None
-
+    
     # pax step
     def pax_step(self, paxAction=None, CPLEXPATH=None, PATH='', platform =  'linux'):
         t = self.time
@@ -211,7 +196,7 @@ class AMoD:
 
             self.info['revenue'] += self.paxAction[k]*(self.price[i,j][t])  
             self.info['profit'] += self.paxAction[k]*(self.price[i,j][t] - self.demandTime[i,j][t]*self.beta) 
-       # print('test_rew:', test_rew)
+
         self.obs = (self.acc, self.time, self.dacc, self.demand) # for acc, the time index would be t+1, but for demand, the time index would be t
         done = False # if passenger matching is executed first
         return self.obs, max(0,self.reward), done, self.info
@@ -253,7 +238,8 @@ class AMoD:
         self.obs = (self.acc, self.time, self.dacc, self.demand) # use self.time to index the next time step
         for i,j in self.G.edges:
             self.G.edges[i,j]['time'] = self.rebTime[i,j][self.time]
-        done = (self.tf == t+1) # if the episode is completed
+        #done = (self.tf == t+1) # if the episode is completed
+        done = False
         return self.obs, self.reward, done, self.info
     
     def step(self, reb_action):
@@ -267,13 +253,13 @@ class AMoD:
         info['rebalancing_cost'] = -rebreward
         rew += rebreward 
 
-        if done: 
-            return obs, rew, done, info
-
+        #if done: 
+        #    return obs, rew, done, info
+       
         obs, paxreward, done, _ = self.pax_step(CPLEXPATH=self.cfg.cplexpath, PATH=self.cfg.directory)
         info['profit'] = paxreward
         rew += paxreward
-        
+        done = (self.tf == self.time+1) # if the episode is completed
         return obs, rew, done, info
 
     def reset(self):

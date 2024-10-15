@@ -478,7 +478,7 @@ class SAC(nn.Module):
                     traci.start(sumo_cmd)
                 obs, rew = self.env.reset()  # initialize environment
                 step = 0
-                obs = self.parser.parse_obs(obs)
+                obs = self.parser.parse_obs(obs).to(self.device)
                 episode_reward = 0
                 episode_reward += rew
                 episode_served_demand = 0
@@ -498,16 +498,16 @@ class SAC(nn.Module):
                         desiredAcc,
                         self.cplexpath,
                     )
+
                     new_obs, rew, done, info = self.env.step(reb_action=reb_action)
                     step += 1
                     episode_reward += rew
                     episode_served_demand += info["profit"]
                     episode_rebalancing_cost += info["rebalancing_cost"]
+                  
+                    new_obs = self.parser.parse_obs(new_obs).to(self.device)
+                    self.replay_buffer.store(obs, action_rl, cfg.model.rew_scale * rew, new_obs)
                     
-                    if not done: 
-                        new_obs = self.parser.parse_obs(new_obs)
-                        self.replay_buffer.store(obs, action_rl, cfg.model.rew_scale * rew, new_obs)
-
                     obs = new_obs
                     if i_episode > 10:
                         batch = self.replay_buffer.sample_batch(cfg.model.batch_size)
@@ -567,7 +567,7 @@ class SAC(nn.Module):
             if sim =='sumo':
                 traci.start(sumo_cmd)
             obs, rew = env.reset()  # initialize environment
-            obs = self.parser.parse_obs(obs)
+            obs = self.parser.parse_obs(obs).to(self.device)
             eps_reward += rew
             eps_served_demand += rew
             actions = []
@@ -593,7 +593,7 @@ class SAC(nn.Module):
                     inflow[j] += reb_action[k]
 
                 if not done:
-                    obs = self.parser.parse_obs(new_obs)
+                    obs = self.parser.parse_obs(new_obs).to(self.device)
                 
                 eps_reward += rew
                 eps_served_demand += info["profit"]

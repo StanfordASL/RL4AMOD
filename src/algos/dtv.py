@@ -1,6 +1,6 @@
 from src.algos.base import BaseAlgorithm
 from pulp import LpProblem, LpMinimize, LpVariable, lpSum, LpBinary, value, LpStatus, PULP_CBC_CMD
-
+import traci
 class DTV(BaseAlgorithm):
     def __init__(self, **kwargs):
         """
@@ -23,13 +23,30 @@ class DTV(BaseAlgorithm):
 
         vehicles = {i: v for (i, v) in accInitTuple}
 
-        demand = {}
-        demand_attr = env.get_demand_attr()
-        #demand_attr = [(i,j,d,o)]
-        demand_dict = {}
-        for (i, j, d, o) in demand_attr:
-            demand_dict[i, j] = d
+        #demand = env.waiting_passengers
+        #print(demand)
+        reservations = traci.person.getTaxiReservations(3)
+        #print('reservations', reservations)
+        #print('unserved_demand', [env.unserved_demand[i][t] for i in env.unserved_demand])
+        #print('waiting_passengers', [env.waiting_passengers[i][t] for i in env.waiting_passengers])
 
+        demand = {}
+        for i in env.region: 
+            demand[i] = 0
+        for trip in reservations:
+            persons = trip.persons[0]
+            waiting_time = traci.person.getWaitingTime(persons)
+            if waiting_time > env.max_waiting_time * 60:
+                traci.person.remove(persons)
+                persons = ''
+            if not persons:
+                continue
+            o = int(persons[(persons.find('o') + 1):persons.find('d')])
+            demand[o] += 1
+
+        #print(demand.values())
+        #assert sum(demand.values()) == sum([env.waiting_passengers[i][t] for i in env.waiting_passengers])
+     
         num_vehicles = sum(vehicles.values())
         num_requests = sum(demand.values())
 
@@ -47,7 +64,7 @@ class DTV(BaseAlgorithm):
             for _ in range(int(demand[i])):
                 request_region[request] = i
                 request += 1
-
+        
         # calculate time for each vehicle to each request according to the region
         time_vehicle_request = {}
         for vehicle in vehicle_region:
@@ -65,8 +82,6 @@ class DTV(BaseAlgorithm):
         
         rebFlow = LpVariable.dicts("x", edge, 0, 1, LpBinary)
 
-        
-        #rebFlow = model.addVars(edge, vtype=GRB.BINARY, name="x")
 
         model += lpSum(rebFlow[e] * time_vehicle_request[e] for e in edge)
     

@@ -16,7 +16,7 @@ def setup_sumo(cfg):
     cfg.net_file = f'{scenario_path}/{cfg.city}/{cfg.net_file}'
     demand_file = f'src/envs/data/scenario_lux{cfg.num_regions}.json'
     aggregated_demand = not cfg.random_od
-
+    
     scenario = Scenario(
         num_cluster=cfg.num_regions, json_file=demand_file, aggregated_demand=aggregated_demand,
         sumo_net_file=cfg.net_file, acc_init=cfg.acc_init, sd=cfg.seed, demand_ratio=cfg.demand_ratio,
@@ -54,16 +54,16 @@ def setup_model(cfg, env, parser, device):
     cfg = cfg.model
     if model_name == "sac" or model_name =="cql":
         from src.algos.sac import SAC
-        return SAC(env=env, input_size=cfg.input_size, cfg=cfg, parser=parser).to(device)
+        return SAC(env=env, input_size=cfg.input_size, cfg=cfg, parser=parser, device=device).to(device)
     elif model_name == "a2c":
         from src.algos.a2c import A2C
-        return A2C(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+        return A2C(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser, device=device).to(device)
     elif model_name == "iql":
         from src.algos.iql import IQL
-        return IQL(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+        return IQL(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser, device=device).to(device)
     elif model_name == "bc":
         from src.algos.bc import BC
-        return BC(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+        return BC(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser, device=device).to(device)
     else:
         raise ValueError(f"Unknown model or baseline: {model_name}")
 
@@ -147,18 +147,18 @@ def main(cfg: DictConfig):
 
     use_cuda = not cfg.model.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-
+    
     model = setup_model(cfg, env, parser, device)
-
-    if hasattr(cfg.model, "pretrained_path"):
+    
+    if hasattr(cfg.model, "pretrained_path"): #load pretrained actor weights
         if cfg.model.pretrained_path is not None:
             model = load_actor_weights(model, cfg.model.pretrained_path)
 
-    if hasattr(cfg.model, "data_path"):
+    if hasattr(cfg.model, "data_path"): 
         Dataset = setup_dataset(cfg, env, device)
-        model.learn(cfg, Dataset)
+        model.learn(cfg, Dataset) #offline RL or BC
     else:
-        model.learn(cfg)
+        model.learn(cfg) #online RL
 
 if __name__ == "__main__":
     main()

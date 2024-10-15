@@ -1,0 +1,11 @@
+name: inf
+
+cplexpath: "/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX installation
+
+no_cuda: true  # Disables CUDA training
+
+test_episodes: 10 # Number of episodes to test agent
+
+roh: 4
+
+max_reb: 6

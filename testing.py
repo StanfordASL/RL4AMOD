@@ -52,24 +52,27 @@ def setup_macro(cfg):
 
 def setup_model(cfg, env, parser, device):
     model_name = cfg.model.name
-
+    
     if model_name == "sac" or model_name =="cql":
         from src.algos.sac import SAC
-        model= SAC(env=env, input_size=cfg.model.input_size, cfg=cfg.model, parser=parser).to(device)
+        model= SAC(env=env, input_size=cfg.model.input_size, cfg=cfg.model, parser=parser, device=device).to(device)
         model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}_best.pth")
         return model
     elif model_name == "a2c":
         from src.algos.a2c import A2C
-        model= A2C(env=env, input_size=cfg.model.input_size, parser=parser).to(device)
+        model= A2C(env=env, input_size=cfg.model.input_size, parser=parser, device=device).to(device)
         model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}_best.pth")
         return model
     elif model_name == "iql":
         from src.algos.iql import IQL
-        return IQL(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
+        model = IQL(env=env, input_size=cfg.model.input_size,cfg=cfg.model, parser=parser, device=device).to(device)
+        model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}.pth")
+        return model
     elif model_name == "bc":
         from src.algos.bc import BC
-        return BC(env=env, input_size=cfg.input_size,cfg=cfg, parser=parser).to(device)
-    
+        model = BC(env=env, input_size=cfg.model.input_size,cfg=cfg.model, parser=parser, device=device).to(device)
+        model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}.pth")
+        return model
     else:
         model_class = get_model(model_name)
         
@@ -79,7 +82,9 @@ def setup_model(cfg, env, parser, device):
             "T": cfg.simulator.time_horizon,
             "policy_name": cfg.model.name
         }
-        
+        for key, value in cfg.model.items():
+            if key not in model_kwargs:
+                model_kwargs[key] = value
         return model_class(**model_kwargs)
 
 def test(config):

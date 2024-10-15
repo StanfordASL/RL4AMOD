@@ -77,7 +77,7 @@ class BaseAlgorithm:
                 eps_reward += rew
                 eps_served_demand += info["profit"]
                 eps_rebalancing_cost += info["rebalancing_cost"]
-        
+            
             episode_reward.append(eps_reward)
             episode_served_demand.append(eps_served_demand)
             episode_rebalancing_cost.append(eps_rebalancing_cost)

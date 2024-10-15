@@ -265,7 +265,7 @@ class IQL(nn.Module):
             if sim =='sumo':
                 traci.start(sumo_cmd)
             obs, rew = env.reset()  # initialize environment
-            obs = self.parser.parse_obs(obs)
+            obs = self.parser.parse_obs(obs).to(self.device)
             eps_reward += rew
             eps_served_demand += rew
             actions = []
@@ -285,13 +285,12 @@ class IQL(nn.Module):
                 )
                 new_obs, rew, done, info = env.step(reb_action=reb_action)
                 #calculate inflow to each node in the graph
-               
+
                 for k in range(len(env.edges)):
                     i,j = env.edges[k]
                     inflow[j] += reb_action[k]
-
-                if not done:
-                    obs = self.parser.parse_obs(new_obs)
+            
+                obs = self.parser.parse_obs(new_obs).to(self.device)
                 
                 eps_reward += rew
                 eps_served_demand += info["profit"]
