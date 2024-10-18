@@ -300,7 +300,7 @@ class AMoD:
         self.update_routes(time=t+tstep)
         for i, j in self.G.edges:
             self.G.edges[i, j]['time'] = self.rebTime[i, j][self.time]
-
+        
         done = (self.duration == t + tstep)  # if the episode is completed
         return self.obs, self.reward, done, self.info
 
@@ -358,7 +358,7 @@ class AMoD:
             traci.vehicle.setStop(taxi_id, edge_d, pos=edge_d_length, flags=1)  # Set the stop in the new location
             traci.vehicle.setStopParameter(taxi_id, 0, 'actType', 'rebalancing')  # Set the taxi condition to rebalancing
         return taxi, arrival_time, rebTime
-
+    
     def reset(self):
         """
         Method to reset the environment with matching in before first env step
@@ -933,7 +933,6 @@ class Scenario:
                         price[i, j][t] = min(3, np.random.exponential(2) + 1) * self.demand_time[i, j][t]
                     trip_attr.append((i, j, t, demand[i, j][t], price[i, j][t]))
 
-        #print(f'Total demand: {sum([demand[i, j][t] for i, j in demand for t in range(0, self.duration, self.tstep)])}')
         return trip_attr
 
     def get_price(self, t, trip):

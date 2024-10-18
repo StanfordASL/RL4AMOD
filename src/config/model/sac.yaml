@@ -39,3 +39,5 @@ determinisitc_backup: False #use q-value deterministic backup
 pretrained_path: null 
 
 only_q_steps: 0 
+
+wandb: false # Enables Weights and Biases logging

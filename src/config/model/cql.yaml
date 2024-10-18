@@ -45,3 +45,5 @@ samples_buffer: 60000 # Number of samples in the replay buffer
 num_random: 10 
 
 temp: 1.0 
+
+wandb: false # Enables Weights and Biases logging

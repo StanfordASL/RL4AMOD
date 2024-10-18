@@ -172,3 +172,21 @@ outputs/
 data/datset_distr_inf.pkl 
 
 data/datset_inf.pkl 
+
+create_dataset_MPC.py
+
+data/
+
+test.ipynb
+
+ckpt/
+
+wandb/
+
+train_sarsa.py
+
+src/config/model/sarsa.yaml
+
+src/algos/sarsa.py
+
+src/envs/data/lux/input/**

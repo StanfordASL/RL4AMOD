@@ -19,7 +19,7 @@ class MPC:
         self.cplexpath = kwargs.get('cplexpath')
         self.directory = kwargs.get('directory')
         self.policy_name = kwargs.get('policy_name')
-        self.T = kwargs.get('T')
+        self.T = 120
         self.platform = None
     
     def MPC_exact(self, env, sumo=False):
@@ -146,7 +146,7 @@ class MPC:
             matching_steps = int(env.cfg.matching_tstep * 60 / env.cfg.sumo_tstep)  # sumo steps between each matching
             if env.scenario.is_meso:
                 matching_steps -= 1
-
+            
             sumo_cmd = [
                 "sumo", "--no-internal-links", "-c", env.cfg.sumocfg_file,
                 "--step-length", str(env.cfg.sumo_tstep),

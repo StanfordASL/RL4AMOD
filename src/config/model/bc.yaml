@@ -29,3 +29,5 @@ test_episodes: 10 # Number of episodes to test agent
 data_path: "dataset" # Path to the data directory
 
 samples_buffer: 60000 # Number of samples in the replay buffer
+
+wandb: false # Enables Weights and Biases logging
