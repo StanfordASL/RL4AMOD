@@ -255,13 +255,13 @@ class AMoD:
 
         #if done: 
         #    return obs, rew, done, info
-       
+
         obs, paxreward, done, _ = self.pax_step(CPLEXPATH=self.cfg.cplexpath, PATH=self.cfg.directory)
         info['profit'] = paxreward
         rew += paxreward
         done = (self.tf == self.time+1) # if the episode is completed
         return obs, rew, done, info
-
+    
     def reset(self):
         # reset the episode
         self.acc = defaultdict(dict)
@@ -300,7 +300,7 @@ class AMoD:
         self.obs = (self.acc, self.time, self.dacc, self.demand)
 
         obs, paxreward, done, info = self.pax_step(CPLEXPATH=self.cfg.cplexpath, PATH=self.cfg.directory)
-
+        
         self.reward = 0
         return obs, paxreward
    

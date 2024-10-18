@@ -7,7 +7,7 @@ from src.nets.actor import GNNActor
 import os 
 import traci
 from tqdm import trange
-
+import torch.nn.functional as F
 class BC(nn.Module):
     """
     Advantage Actor Critic algorithm for the AMoD control problem.
@@ -57,7 +57,7 @@ class BC(nn.Module):
         state = self.obs_parser.parse_obs(obs, device)
         return state
 
-    def select_action(self, data, deterministic=True):
+    def select_action(self, data, deterministic=False):
         with torch.no_grad():
             a, _ = self.actor(data.x, data.edge_index, deterministic)
         a = a.squeeze(-1)
@@ -73,21 +73,25 @@ class BC(nn.Module):
          
         m = self.actor(state_batch, edge_index, return_dist=True)
 
-        policy_logpp = m.log_prob(action_batch)
+
+        #policy_logpp = m.log_prob(action_batch)
         
-        loss_pi = (-policy_logpp).mean()
-        '''
+        #loss_pi = (-policy_logpp).mean()
+        #assert loss_pi not in [float("nan"), float("inf"), float("-inf")], "Loss is invalid"
+        
         #alternative loss
         a = m.rsample()
         a = a.squeeze(-1)
-        loss_pi = F.mse_loss(a, action_batch)
-        '''
 
+        loss_pi = F.mse_loss(a, action_batch.float())
+       
         self.optimizers["a_optimizer"].zero_grad()
         loss_pi.backward()
         nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip)
         self.optimizers["a_optimizer"].step()
-
+    
+        if self.wandb is not None:
+            self.wandb.log({"Policy Loss": loss_pi.item()})
         return
 
     def configure_optimizers(self):
@@ -143,7 +147,6 @@ class BC(nn.Module):
             actions = []
             inflow = np.zeros(len(env.region))
             while not done:
-                
                 action_rl = self.select_action(obs, deterministic=True)
                 actions.append(action_rl)
                 desiredAcc = {env.region[i]: int(action_rl[i] * dictsum(env.acc, env.time + 1))
@@ -189,34 +192,13 @@ class BC(nn.Module):
         )
 
     def learn(self, cfg, Dataset=None):
-        sim = cfg.simulator.name
-        if sim == "sumo": 
-            #traci.close(wait=False)
-            scenario_path = '/src/envs/data/lux/'
-            sumocfg_file = 'dua_meso.static.sumocfg'
-            net_file = os.path.join(scenario_path, 'input/lust_meso.net.xml')
-            os.makedirs('saved_files/sumo_output/scenario_lux/', exist_ok=True)
-            matching_steps = int(cfg.simulator.matching_tstep * 60 / cfg.simulator.sumo_tstep)  # sumo steps between each matching
-            if 'meso' in net_file:
-                matching_steps -= 1 
-                
-            sumo_cmd = [
-            "sumo", "--no-internal-links", "-c", os.path.join(scenario_path, sumocfg_file),
-            "--step-length", str(cfg.simulator.sumo_tstep),
-            "--device.taxi.dispatch-algorithm", "traci",
-            "-b", str(cfg.simulator.time_start * 60 * 60), "--seed", "10",
-            "-W", 'true', "-v", 'false',
-            ]
-            assert os.path.exists(os.path.join(scenario_path, sumocfg_file)), "SUMO configuration file not found!"
-
-
         train_episodes = cfg.model.max_episodes  # set max number of training episodes
         T = cfg.simulator.max_steps  # set episode length
         epochs = trange(train_episodes*T)  #  # epoch iterator
         self.train()  # set model in train mode
         
         for step in epochs:
-            if step % 1000 == 0:
+            if step % 1000 == 0 and step > 0:
                 self.eval()
                 (
                     episode_reward,
@@ -229,7 +211,10 @@ class BC(nn.Module):
                     f"Offline Step {step} | Reward: {np.mean(episode_reward):.2f} | ServedDemand: {np.mean(episode_served_demand):.2f} | Reb. Cost: {np.mean(episode_rebalancing_cost):.2f}"
                 )
                 epochs.update(1000)
-                
+
+                if self.wandb is not None:
+                    self.wandb.log({"Reward": np.mean(episode_reward), "Served Demand": np.mean(episode_served_demand), "Rebalancing Cost": np.mean(episode_rebalancing_cost), "Step": step})
+            
             self.save_checkpoint(
             path=f"ckpt/{cfg.model.checkpoint_path}.pth"
             )

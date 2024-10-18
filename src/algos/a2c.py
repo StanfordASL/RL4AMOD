@@ -111,12 +111,6 @@ class A2C(nn.Module):
         return [loss.item() for loss in value_losses], [loss.item() for loss in policy_losses]
     
     def learn(self, cfg):
-        log = {'train_reward': [], 
-           'train_served_demand': [], 
-           'train_reb_cost': [],
-           'train_reb_vehicles': [],
-           'train_policy_losses': [],
-           'train_value_losses': []}
 
         train_episodes = cfg.model.max_episodes #set max number of training episodes
         T = cfg.model.max_steps #set episode length
@@ -148,9 +142,7 @@ class A2C(nn.Module):
                     self.cplexpath,
                 )
                 new_obs, rew, done, info = self.env.step(reb_action=reb_action)
-                #reb_action = self.solveRebFlow(self.env, f'sac/scenario_lux/{self.cfg.agent_name}', desired_acc, self.cfg.cplexpath)
-
-                #obs, rew, done, info = self.env.step(reb_action=reb_action)
+               
                 self.rewards.append(rew)
                 # track performance over episode
                 episode_reward += rew

@@ -82,8 +82,8 @@ class IQL(nn.Module):
     def parse_obs(self, obs, device):
         state = self.obs_parser.parse_obs(obs, device)
         return state
-
-    def select_action(self, data, deterministic=True):
+    
+    def select_action(self, data, deterministic=False):
         with torch.no_grad():
             a, _ = self.actor(data.x, data.edge_index, deterministic)
         a = a.squeeze(-1)
@@ -358,6 +358,9 @@ class IQL(nn.Module):
                 )
                 epochs.update(1000)
                 
+                if self.wandb is not None:
+                    self.wandb.log({"Reward": np.mean(episode_reward), "Served Demand": np.mean(episode_served_demand), "Rebalancing Cost": np.mean(episode_rebalancing_cost), "Step": step})
+                    
             self.save_checkpoint(
             path=f"ckpt/{cfg.model.checkpoint_path}.pth"
             )

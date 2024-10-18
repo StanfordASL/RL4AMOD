@@ -21,7 +21,7 @@ class PairData(Data):
     Store 2 graphs in one Data object (s_t and s_t+1)
     """
 
-    def __init__(self, edge_index_s=None, x_s=None, reward=None, action=None, edge_index_t=None, x_t=None):
+    def __init__(self, edge_index_s=None, x_s=None, reward=None, action=None, edge_index_t=None, x_t=None, next_action=None):
         super().__init__()
         self.edge_index_s = edge_index_s
         self.x_s = x_s
@@ -29,6 +29,7 @@ class PairData(Data):
         self.action = action
         self.edge_index_t = edge_index_t
         self.x_t = x_t
+        #self.next_action = next_action
 
     def __inc__(self, key, value, *args, **kwargs):
         if key == 'edge_index_s':
@@ -62,7 +63,9 @@ class ReplayData:
             data["action"],
             rew_scale * data["reward"],
             data["next_state"],
+            #data["next_action"]
         )
+
         for i in range(len(state_batch)):
             self.data_list.append(
                 PairData(
@@ -72,6 +75,7 @@ class ReplayData:
                     action_batch[i],
                     edge_index,
                     next_state_batch[i],
+                    #next_action_batch[i]
                 )
             )
 
@@ -181,13 +185,14 @@ class SAC(nn.Module):
             self.temp = cfg.temp
         if hasattr(cfg, 'num_random'):
             self.num_random = cfg.num_random
-    def select_action(self, data, deterministic=True):
+    
+    def select_action(self, data, deterministic=False):
         with torch.no_grad():
             a, _ = self.actor(data.x, data.edge_index, deterministic)
         a = a.squeeze(-1)
         a = a.detach().cpu().numpy()[0]
         return list(a)
-
+    
     def compute_loss_q(self, data, conservative=False):
         (
             state_batch,
@@ -208,6 +213,8 @@ class SAC(nn.Module):
         q1 = self.critic1(state_batch, edge_index, action_batch)
         q2 = self.critic2(state_batch, edge_index, action_batch)
 
+        if self.wandb is not None:
+            self.wandb.log({"Q1": q1.mean().item()})
         with torch.no_grad():
             # Target actions come from *current* policy
             a2, logp_a2 = self.actor(next_state_batch, edge_index2)
@@ -329,7 +336,8 @@ class SAC(nn.Module):
             ):
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
-        
+        if self.wandb is not None:
+            self.wandb.log({"Q1 Loss": loss_q1.item()})
         if not only_q:
             # Freeze Q-networks so you don't waste computational effort
             # computing gradients for them during the policy learning step.
@@ -350,6 +358,9 @@ class SAC(nn.Module):
                 p.requires_grad = True
             for p in self.critic2.parameters():
                 p.requires_grad = True
+
+            if self.wandb is not None:
+                self.wandb.log({"Policy Loss": loss_pi.item()})
 
     def _get_action_and_values(self, data, num_actions, batch_size, action_dim):
       
@@ -435,7 +446,6 @@ class SAC(nn.Module):
             "-b", str(cfg.simulator.time_start * 60 * 60), "--seed", "10",
             "-W", 'true', "-v", 'false',
             ]
-            print(cfg.simulator.sumocfg_file)
             assert os.path.exists(cfg.simulator.sumocfg_file), "SUMO configuration file not found!"
 
         if Dataset is not None:
@@ -459,7 +469,8 @@ class SAC(nn.Module):
                         f"Offline Step {step} | Reward: {np.mean(episode_reward):.2f} | ServedDemand: {np.mean(episode_served_demand):.2f} | Reb. Cost: {np.mean(episode_rebalancing_cost):.2f}"
                     )
                     epochs.update(1000)
-
+                    if self.wandb is not None:
+                        self.wandb.log({"Reward": np.mean(episode_reward), "Served Demand": np.mean(episode_served_demand), "Rebalancing Cost": np.mean(episode_rebalancing_cost), "Step": step})
                 self.save_checkpoint(
                 path=f"ckpt/{cfg.model.checkpoint_path}.pth"
                 )
@@ -485,7 +496,7 @@ class SAC(nn.Module):
                 episode_rebalancing_cost = 0
                 episode_served_demand += rew
                 done = False
-
+                
                 while not done:
                     action_rl = self.select_action(obs)
                     desiredAcc = {self.env.region[i]: int(action_rl[i] * dictsum(self.env.acc, self.env.time + 1))
@@ -504,21 +515,23 @@ class SAC(nn.Module):
                     episode_reward += rew
                     episode_served_demand += info["profit"]
                     episode_rebalancing_cost += info["rebalancing_cost"]
-                  
+                    
                     new_obs = self.parser.parse_obs(new_obs).to(self.device)
                     self.replay_buffer.store(obs, action_rl, cfg.model.rew_scale * rew, new_obs)
                     
                     obs = new_obs
                     if i_episode > 10:
                         batch = self.replay_buffer.sample_batch(cfg.model.batch_size)
-                        if step < cfg.model.only_q_steps:
+                        if i_episode < cfg.model.only_q_steps:
                             self.update(data=batch, only_q=True)
                         else:
                             self.update(data=batch)
                 epochs.set_description(
                     f"Episode {i_episode+1} | Reward: {episode_reward:.2f} | ServedDemand: {episode_served_demand:.2f} | Reb. Cost: {episode_rebalancing_cost:.2f}"
                 )
-        
+                if self.wandb is not None:
+                        self.wandb.log({"Reward": episode_reward, "Served Demand": episode_served_demand, "Rebalancing Cost": episode_rebalancing_cost, "Step": i_episode})
+                        
                 self.save_checkpoint(
                     path=f"ckpt/{cfg.model.checkpoint_path}.pth"
                 )
@@ -631,7 +644,6 @@ class SAC(nn.Module):
         try:
             # Attempt to load the model state dict as is
             self.load_state_dict(checkpoint["model"])
-            #print(checkpoint["model"].keys())
         except RuntimeError as e:
         
             model_state_dict = checkpoint["model"]

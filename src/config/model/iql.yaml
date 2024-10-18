@@ -37,3 +37,5 @@ data_path: "dataset" # Path to the data directory
 samples_buffer: 60000 # Number of samples in the replay buffer
 
 clip_score: 100 
+
+wandb: false # Enables Weights and Biases logging

@@ -150,10 +150,19 @@ def main(cfg: DictConfig):
     
     model = setup_model(cfg, env, parser, device)
     
-    if hasattr(cfg.model, "pretrained_path"): #load pretrained actor weights
-        if cfg.model.pretrained_path is not None:
-            model = load_actor_weights(model, cfg.model.pretrained_path)
-
+    model.wandb = None
+    if cfg.model.wandb: 
+        import wandb
+        config = {}
+        for key in cfg.model.keys():
+            config[key] = cfg.model[key]
+        wandb = wandb.init(
+            project="",
+            entity="",
+            config=config,
+        )
+        model.wandb = wandb
+        
     if hasattr(cfg.model, "data_path"): 
         Dataset = setup_dataset(cfg, env, device)
         model.learn(cfg, Dataset) #offline RL or BC
