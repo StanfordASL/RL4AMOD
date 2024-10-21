@@ -19,7 +19,7 @@ class MPC:
         self.cplexpath = kwargs.get('cplexpath')
         self.directory = kwargs.get('directory')
         self.policy_name = kwargs.get('policy_name')
-        self.T = 120
+        self.T = kwargs.get("T")
         self.platform = None
     
     def MPC_exact(self, env, sumo=False):
