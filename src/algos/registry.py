@@ -1,4 +1,3 @@
-
 from src.algos.sac import SAC
 from src.algos.a2c import A2C
 from src.algos.ed import EqualDistribution
@@ -8,7 +7,6 @@ from src.algos.random import RandomBaseline
 from src.algos.MPC import MPC
 from src.algos.dtv import DTV
 from src.algos.inf import INF
-from src.algos.sarsa import SARSA
 
 MODEL_REGISTRY = {
     "sac": SAC,
@@ -20,7 +18,6 @@ MODEL_REGISTRY = {
     "mpc": MPC, 
     "dtv": DTV, 
     "inf": INF,
-    "sarsa": SARSA
 }
 
 def get_model(model_name):
