@@ -163,11 +163,14 @@ class MPC:
         episode_reward = []
         episode_served_demand = []
         episode_rebalancing_cost = []
+        seeds = list(range(env.cfg.seed, env.cfg.seed + num_episodes+1))
         inflows = []
         for i_episode in epochs:
             eps_reward = 0
             eps_served_demand = 0
             eps_rebalancing_cost = 0
+            # Set seed for reproducibility across different policies
+            np.random.seed(seeds[i_episode])
             inflow = np.zeros(env.nregion)
             done = False
             if sim =='sumo':

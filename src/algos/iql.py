@@ -255,6 +255,7 @@ class IQL(nn.Module):
         episode_served_demand = []
         episode_rebalancing_cost = []
         episode_rebalanced_vehicles = []
+        seeds = list(range(env.cfg.seed, env.cfg.seed + test_episodes+1))
         episode_actions = []
         episode_inflows = []
         for i_episode in epochs:
@@ -262,6 +263,8 @@ class IQL(nn.Module):
             eps_served_demand = 0
             eps_rebalancing_cost = 0
             eps_rebalancing_veh = 0
+            # Set seed for reproducibility across different policies
+            np.random.seed(seeds[i_episode])
             done = False
             if sim =='sumo':
                 traci.start(sumo_cmd)
