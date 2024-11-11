@@ -118,7 +118,7 @@ class BC(nn.Module):
                 "--summary-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.agent_name + "_dua_meso.static.summary.xml",
                 "--tripinfo-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.agent_name + "_dua_meso.static.tripinfo.xml",
                 "--tripinfo-output.write-unfinished", "true",
-                "-b", str(env.cfg.time_start * 60 * 60), "--seed", "10",
+                "-b", str(env.cfg.time_start * 60 * 60), "--seed", str(env.cfg.seed),
                 "-W", 'true', "-v", 'false',
             ]
             assert os.path.exists(env.cfg.sumocfg_file), "SUMO configuration file not found!"

@@ -151,10 +151,11 @@ class MPC:
                 "sumo", "--no-internal-links", "-c", env.cfg.sumocfg_file,
                 "--step-length", str(env.cfg.sumo_tstep),
                 "--device.taxi.dispatch-algorithm", "traci",
+                "--device.rerouting.threads", "1",
                 "--summary-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.policy_name + "_dua_meso.static.summary.xml",
                 "--tripinfo-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.policy_name + "_dua_meso.static.tripinfo.xml",
                 "--tripinfo-output.write-unfinished", "true",
-                "-b", str(env.cfg.time_start * 60 * 60), "--seed", "10",
+                "-b", str(env.cfg.time_start * 60 * 60), "--seed", str(env.cfg.seed),
                 "-W", 'true', "-v", 'false',
             ]
             assert os.path.exists(env.cfg.sumocfg_file), "SUMO configuration file not found!"
