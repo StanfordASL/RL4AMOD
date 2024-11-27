@@ -120,6 +120,20 @@ def train(config):
     use_cuda = not cfg.model.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     model = setup_model(cfg, env, parser, device)
+    
+    model.wandb = None
+    if cfg.model.wandb: 
+        import wandb
+        config = {}
+        for key in cfg.model.keys():
+            config[key] = cfg.model[key]
+        wandb = wandb.init(
+            project="",
+            entity="",
+            config=config,
+        )
+        model.wandb = wandb
+
     model.learn(cfg)
 
 def load_actor_weights(model, path):
@@ -162,7 +176,7 @@ def main(cfg: DictConfig):
             config=config,
         )
         model.wandb = wandb
-        
+
     if hasattr(cfg.model, "data_path"): 
         Dataset = setup_dataset(cfg, env, device)
         model.learn(cfg, Dataset) #offline RL or BC
