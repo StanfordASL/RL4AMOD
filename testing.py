@@ -60,7 +60,7 @@ def setup_model(cfg, env, parser, device):
         return model
     elif model_name == "a2c":
         from src.algos.a2c import A2C
-        model= A2C(env=env, input_size=cfg.model.input_size, parser=parser, device=device).to(device)
+        model = A2C(env=env, input_size=cfg.model.input_size,cfg=cfg.model, parser=parser, device=device).to(device)
         model.load_checkpoint(path=f"ckpt/{cfg.model.checkpoint_path}_best.pth")
         return model
     elif model_name == "iql":
