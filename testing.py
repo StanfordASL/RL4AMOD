@@ -118,7 +118,7 @@ def test(config):
     inflows = np.mean(inflows, axis=0)
     
     #check if no_control performance is saved
-    path = f'/src/envs/data/{cfg.simulator.name}/{cfg.simulator.city}_no_control_performance.json'
+    path = f'src/envs/data/{cfg.simulator.name}/{cfg.simulator.city}_no_control_performance.json'
     #check if path exists
     if os.path.exists(path):
         with open(path, 'r') as f:
