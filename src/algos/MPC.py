@@ -170,10 +170,11 @@ class MPC:
                 "sumo", "--no-internal-links", "-c", env.cfg.sumocfg_file,
                 "--step-length", str(env.cfg.sumo_tstep),
                 "--device.taxi.dispatch-algorithm", "traci",
+                "--device.rerouting.threads", "1",
                 "--summary-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.policy_name + "_dua_meso.static.summary.xml",
                 "--tripinfo-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.policy_name + "_dua_meso.static.tripinfo.xml",
                 "--tripinfo-output.write-unfinished", "true",
-                "-b", str(env.cfg.time_start * 60 * 60), "--seed", "10",
+                "-b", str(env.cfg.time_start * 60 * 60), "--seed", str(env.cfg.seed),
                 "-W", 'true', "-v", 'false',
             ]
             assert os.path.exists(env.cfg.sumocfg_file), "SUMO configuration file not found!"
@@ -181,11 +182,14 @@ class MPC:
         episode_reward = []
         episode_served_demand = []
         episode_rebalancing_cost = []
+        seeds = list(range(env.cfg.seed, env.cfg.seed + num_episodes+1))
         inflows = []
         for i_episode in epochs:
             eps_reward = 0
             eps_served_demand = 0
             eps_rebalancing_cost = 0
+            # Set seed for reproducibility across different policies
+            np.random.seed(seeds[i_episode])
             inflow = np.zeros(env.nregion)
             done = False
             if sim =='sumo':

@@ -118,7 +118,7 @@ class BC(nn.Module):
                 "--summary-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.agent_name + "_dua_meso.static.summary.xml",
                 "--tripinfo-output", "saved_files/sumo_output/" + env.cfg.city + "/" + self.agent_name + "_dua_meso.static.tripinfo.xml",
                 "--tripinfo-output.write-unfinished", "true",
-                "-b", str(env.cfg.time_start * 60 * 60), "--seed", "10",
+                "-b", str(env.cfg.time_start * 60 * 60), "--seed", str(env.cfg.seed),
                 "-W", 'true', "-v", 'false',
             ]
             assert os.path.exists(env.cfg.sumocfg_file), "SUMO configuration file not found!"
@@ -130,6 +130,7 @@ class BC(nn.Module):
         episode_served_demand = []
         episode_rebalancing_cost = []
         episode_rebalanced_vehicles = []
+        seeds = list(range(env.cfg.seed, env.cfg.seed + test_episodes+1))
         episode_actions = []
         episode_inflows = []
         for i_episode in epochs:
@@ -137,6 +138,8 @@ class BC(nn.Module):
             eps_served_demand = 0
             eps_rebalancing_cost = 0
             eps_rebalancing_veh = 0
+            # Set seed for reproducibility across different policies
+            np.random.seed(seeds[i_episode])
             done = False
             if sim =='sumo':
                 traci.start(sumo_cmd)
