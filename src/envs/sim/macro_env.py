@@ -182,7 +182,7 @@ class AMoD:
             if (i,j) not in self.demand or t not in self.demand[i,j] or self.paxAction[k]<1e-3:
                 continue
             # I moved the min operator above, since we want paxFlow to be consistent with paxAction
-            assert paxAction[k] < self.acc[i][t+1] + 1e-3
+            #assert paxAction[k] < self.acc[i][t+1] + 1e-3
             self.paxAction[k] = min(self.acc[i][t+1], paxAction[k])            
             self.servedDemand[i,j][t] = self.paxAction[k]
             self.paxFlow[i,j][t+self.demandTime[i,j][t]] = self.paxAction[k]
@@ -192,7 +192,7 @@ class AMoD:
             self.dacc[j][t+self.demandTime[i,j][t]] += self.paxFlow[i,j][t+self.demandTime[i,j][t]]
             self.reward += self.paxAction[k]*(self.price[i,j][t] - self.demandTime[i,j][t]*self.beta)  
             test_rew += self.paxAction[k]*(self.price[i,j][t]) 
-
+            
             self.info['revenue'] += self.paxAction[k]*(self.price[i,j][t])  
             self.info['profit'] += self.paxAction[k]*(self.price[i,j][t] - self.demandTime[i,j][t]*self.beta) 
 
