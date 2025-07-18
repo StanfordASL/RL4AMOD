@@ -5,3 +5,5 @@ cplexpath: "/opt/opl/bin/x86-64_linux/"  # Defines directory of the CPLEX instal
 no_cuda: true  # Disables CUDA training
 
 test_episodes: 10 # Number of episodes to test agent
+
+oracle: true  # Use oracle for MPC or forecast

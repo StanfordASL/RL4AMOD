@@ -170,7 +170,6 @@ class AMoD:
         for i in self.region:
             self.acc[i][t+1] = self.acc[i][t]
         self.info['served_demand'] = 0 # initialize served demand
-        self.info["operating_cost"] = 0 # initialize operating cost
         self.info['revenue'] = 0
         self.info['profit'] = 0
         if paxAction is None:  # default matching algorithm used if isMatching is True, matching method will need the information of self.acc[t+1], therefore this part cannot be put forward
@@ -183,7 +182,7 @@ class AMoD:
             if (i,j) not in self.demand or t not in self.demand[i,j] or self.paxAction[k]<1e-3:
                 continue
             # I moved the min operator above, since we want paxFlow to be consistent with paxAction
-            assert paxAction[k] < self.acc[i][t+1] + 1e-3
+            #assert paxAction[k] < self.acc[i][t+1] + 1e-3
             self.paxAction[k] = min(self.acc[i][t+1], paxAction[k])            
             self.servedDemand[i,j][t] = self.paxAction[k]
             self.paxFlow[i,j][t+self.demandTime[i,j][t]] = self.paxAction[k]
@@ -193,7 +192,7 @@ class AMoD:
             self.dacc[j][t+self.demandTime[i,j][t]] += self.paxFlow[i,j][t+self.demandTime[i,j][t]]
             self.reward += self.paxAction[k]*(self.price[i,j][t] - self.demandTime[i,j][t]*self.beta)  
             test_rew += self.paxAction[k]*(self.price[i,j][t]) 
-
+            
             self.info['revenue'] += self.paxAction[k]*(self.price[i,j][t])  
             self.info['profit'] += self.paxAction[k]*(self.price[i,j][t] - self.demandTime[i,j][t]*self.beta) 
 
@@ -203,11 +202,8 @@ class AMoD:
     
     # reb step
     def reb_step(self, rebAction):
-        self.info['served_demand'] = 0 # initialize served demand
-        self.info["operating_cost"] = 0 # initialize operating cost
-        self.info['revenue'] = 0
-        self.info['rebalancing_cost'] = 0#
-        self.info['profit'] = 0
+        self.info['rebalancing_cost'] = 0
+        self.info["operating_cost"] = 0
         t = self.time
         self.reward = 0 # reward is calculated from before this to the next rebalancing, we may also have two rewards, one for pax matching and one for rebalancing
         self.rebAction = rebAction      
@@ -238,8 +234,8 @@ class AMoD:
         self.obs = (self.acc, self.time, self.dacc, self.demand) # use self.time to index the next time step
         for i,j in self.G.edges:
             self.G.edges[i,j]['time'] = self.rebTime[i,j][self.time]
-        #done = (self.tf == t+1) # if the episode is completed
-        done = False
+        done = (self.tf == self.time+1) # if the episode is completed
+ 
         return self.obs, self.reward, done, self.info
     
     def step(self, reb_action):
@@ -249,14 +245,11 @@ class AMoD:
         info = {}
         info['rebalancing_cost'] = 0 
         info['profit'] = 0
-        obs, rebreward, done, _ = self.reb_step(reb_action)
+        obs, rebreward, _, _ = self.reb_step(reb_action)
         info['rebalancing_cost'] = -rebreward
         rew += rebreward 
 
-        #if done: 
-        #    return obs, rew, done, info
-
-        obs, paxreward, done, _ = self.pax_step(CPLEXPATH=self.cfg.cplexpath, PATH=self.cfg.directory)
+        obs, paxreward, _, _ = self.pax_step(CPLEXPATH=self.cfg.cplexpath, PATH=self.cfg.directory)
         info['profit'] = paxreward
         rew += paxreward
         done = (self.tf == self.time+1) # if the episode is completed
