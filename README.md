@@ -177,5 +177,16 @@ python testing.py  simulator.name=macro model=sac simulator.city=nyc_brooklyn mo
 python testing.py  simulator.name=macro model.name=equal_distribution simulator.city=nyc_brooklyn
 ```
 
+To run MPC-Oracle: 
+```
+python testing.py  simulator=sumo simulator.time_horizon=120 model.oracle=True model=mpc
+```
+
+
+To run MPC-Forecast: 
+```
+python testing.py  simulator=sumo simulator.time_horizon=10 model.oracle=False model=mpc
+```
+
 ----------
 In case of any questions, bugs, suggestions or improvements, please feel free to contact us at <gammelli@stanford.edu>, csasc@dtu.dk or <ltresca@stanford.edu>.
