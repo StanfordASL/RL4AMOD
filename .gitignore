@@ -190,3 +190,5 @@ src/config/model/sarsa.yaml
 src/algos/sarsa.py
 
 src/envs/data/lux/input/**
+
+*.xml

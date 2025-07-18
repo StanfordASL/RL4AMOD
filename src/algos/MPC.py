@@ -21,6 +21,7 @@ class MPC:
         self.policy_name = kwargs.get('policy_name')
         self.T = kwargs.get("T")
         self.platform = None
+        self.oracle = kwargs.get("oracle", True)
     
     def MPC_exact(self, env, sumo=False):
         tstep = env.tstep
@@ -50,7 +51,10 @@ class MPC:
                     flows.append((o, d, env.demand_time[o, d][t], env.price[o, d][t]))
                     demandAttr.append((o, d, t, 1, env.demand_time[o, d][t], env.price[o, d][t]))
             # Future demand
-            demandAttr.extend([(i,j,tt,env.demand[i,j][tt], env.demand_time[i,j][tt], env.price[i,j][tt]) for i,j in env.demand for tt in range(t+tstep, min(t+self.T, env.duration), tstep) if env.demand[i,j][tt]>1e-3])
+            if self.oracle: 
+                demandAttr.extend([(i,j,tt,env.demand[i,j][tt], env.demand_time[i,j][tt], env.price[i,j][tt]) for i,j in env.demand for tt in range(t+tstep, min(t+self.T, env.duration), tstep) if env.demand[i,j][tt]>1e-3])
+            else: 
+                demandAttr.extend([(i,j,tt,env.scenario.demand_input[i,j][tt], env.demand_time[i,j][tt], env.price[i,j][tt]) for i,j in env.demand for tt in range(t+tstep, min(t+self.T, env.duration), tstep) if env.scenario.demand_input[i,j][tt]>1e-3])
             accTuple = [(n,env.acc[n][t+tstep]) for n in env.acc]
             daccTuple = [(n,tt,env.dacc[n][tt]) for n in env.acc for tt in range(t,min(t+self.T, env.duration))]
             edgeAttr = [(i,j,env.rebTime[i,j][t]) for i,j in env.edges]
@@ -59,19 +63,34 @@ class MPC:
         else: 
 
             t = env.time
-            demandAttr = [
-                (
-                    i,
-                    j,
-                    tt,
-                    env.demand[i, j][tt],
-                    env.demandTime[i, j][tt],
-                    env.price[i, j][tt],
-                )
-                for i, j in env.demand
-                for tt in range(t, t + self.T)
-                if env.demand[i, j][tt] > 1e-3
-            ]
+            if self.oracle:
+                demandAttr = [
+                    (
+                        i,
+                        j,
+                        tt,
+                        env.demand[i, j][tt],
+                        env.demandTime[i, j][tt],
+                        env.price[i, j][tt],
+                    )
+                    for i, j in env.demand
+                    for tt in range(t, t + self.T)
+                    if env.demand[i, j][tt] > 1e-3
+                ]
+            else:
+                demandAttr = [
+                    (
+                        i,
+                        j,
+                        tt,
+                        round(env.scenario.demand_input[i, j][tt]),
+                        env.demandTime[i, j][tt],
+                        env.price[i, j][tt],
+                    )
+                    for i, j in env.scenario.demand_input
+                    for tt in range(t, t + self.T)
+                    if env.scenario.demand_input[i, j][tt] > 1e-3
+                ]
             accTuple = [(n, env.acc[n][t]) for n in env.acc]
             daccTuple = [
                 (n, tt, env.dacc[n][tt])
@@ -197,12 +216,12 @@ class MPC:
                 else:
                     pax_action, reb_action = self.MPC_exact(env)
 
-                    _, paxreward, done, info = env.pax_step(paxAction=pax_action, CPLEXPATH=self.cplexpath)
+                    _, paxreward, _, info = env.pax_step(paxAction=pax_action, CPLEXPATH=self.cplexpath)
 
                     _, rebreward, done, info = env.reb_step(reb_action)
 
                     rew = paxreward + rebreward
-
+    
                 for k in range(len(env.edges)):
                     i,j = env.edges[k]
                     inflow[j] += reb_action[k]
