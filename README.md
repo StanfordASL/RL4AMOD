@@ -14,7 +14,7 @@ We aim to provide:
 
 ## Prerequisites
 
-* We recommend using CPLEX, however if you don't have access to a IBM cplex installation, we provide an alternative with the free python package PuLP. If you are a student or academic, IBM is releasing CPLEX Optimization Studio for free. You can find more info [here](https://community.ibm.com/community/user/datascience/blogs/xavier-nodet1/2020/07/09/cplex-free-for-students)
+* We recommend using CPLEX, however if you don't have access to a IBM cplex installation, we provide an alternative with the free python package PuLP. If you are a student or academic, IBM is releasing CPLEX Optimization Studio for free. You can find more info [here](https://community.ibm.com/community/user/datascience/blogs/xavier-nodet1/2020/07/09/cplex-free-for-students) Please note, that all results reported are obtained with CPLEX. 
 
 
 * You will need to have a working installation of SUMO (Simulation of Urban MObility). It is an open source microscopic and continous multi-modal traffic simulation package used to handle large networks. The repo is based on the version 1.20.0. Find the information for SUMO installation [here](https://sumo.dlr.de/docs/Installing/index.html)
