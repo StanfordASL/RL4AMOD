@@ -128,10 +128,8 @@ def test(config):
         no_reb_cost = no_control_performance['rebalancing_cost']
     else:
         print('No control performance not found. Calculating (this happens only the first time on a new environment)...')
-        cfg_copy = cfg.copy()
-        cfg_copy.model.name = 'no_rebalancing'
-        model = setup_model(cfg, env, parser, device)
-        no_reb_reward, no_reb_demand, no_reb_cost, _ = model.test(10, env)
+        no_reb_model = get_model('no_rebalancing')()
+        no_reb_reward, no_reb_demand, no_reb_cost, _ = no_reb_model.test(10, env)
         no_reb_reward = round(np.mean(no_reb_reward)/1000,2)
         no_reb_demand = round(np.mean(no_reb_demand)/1000,2)
         no_reb_cost = round(np.mean(no_reb_cost)/1000,2)
